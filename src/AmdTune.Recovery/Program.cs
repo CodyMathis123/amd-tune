@@ -29,43 +29,14 @@ try
     // Signal readiness only when lease contents and bridge location have been validated.
     await File.WriteAllTextAsync(leaseFile + ".ready", "ready");
     Log("Guard armed, monitoring pid " + lease.ParentProcessId);
-    while (!File.Exists(leaseFile + ".done"))
-    {
-        var parentAlive = IsProcessAlive(lease.ParentProcessId);
-        var stale = DateTime.UtcNow - File.GetLastWriteTimeUtc(leaseFile) > TimeSpan.FromSeconds(20);
-        if (!parentAlive || stale)
-        {
-            Log($"Recovery triggered. parentAlive={parentAlive}, stale={stale}");
-            var recovered = false;
-            for (var retry = 1; retry <= 5; retry++)
-            {
-                try
-                {
-                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    await bridge.ApplyAsync(lease.Baseline, timeout.Token);
-                    var actual = await bridge.ReadSettingsAsync(timeout.Token);
-                    TunePolicy.RequireReadback(lease.Baseline, actual);
-                    Log("RECOVERY VERIFIED: restored initial settings.");
-                    recovered = true;
-                    break;
-                }
-                catch (Exception error)
-                {
-                    Log("Recovery attempt " + retry + " failed: " + error.Message);
-                    await Task.Delay(1000);
-                }
-            }
-            if (!recovered)
-            {
-                Log("RECOVERY FAILED. MANUALLY RESET AMD ADRENALIN TUNING TO DEFAULT.");
-                return 3;
-            }
-            return 0;
-        }
-        await Task.Delay(500);
-    }
-    Log("Guard disarmed after parent verified rollback.");
-    return 0;
+    var monitor = new RecoveryMonitor(bridge,
+        () => IsProcessAlive(lease.ParentProcessId),
+        () => File.Exists(leaseFile + ".done"),
+        () => DateTime.UtcNow - File.GetLastWriteTimeUtc(leaseFile),
+        (delay, ct) => Task.Delay(delay, ct),
+        Log);
+    var outcome = await monitor.RunAsync(lease.Baseline, CancellationToken.None);
+    return outcome == RecoveryOutcome.Failed ? 3 : 0;
 }
 catch (Exception e)
 {

@@ -130,4 +130,41 @@ public class ExperimentTests
         }
         finally { if (Directory.Exists(path)) Directory.Delete(path, true); }
     }
+
+    [Fact]
+    public async Task Independent_recovery_monitor_restores_baseline_when_parent_dies()
+    {
+        var gpu = new SimulatedGpuDevice();
+        var baseline = gpu.Current;
+        await gpu.ApplyAsync(baseline with { VoltageOffsetMv = -15 }, default);
+        var logs = new List<string>();
+        var monitor = new RecoveryMonitor(gpu, () => false, () => false,
+            () => TimeSpan.Zero, (delay, ct) => Task.CompletedTask, logs.Add);
+        var outcome = await monitor.RunAsync(baseline, default);
+        Assert.Equal(RecoveryOutcome.Restored, outcome);
+        Assert.Equal(baseline, gpu.Current);
+        Assert.Contains(logs, line => line.Contains("RECOVERY VERIFIED", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Independent_recovery_monitor_fails_closed_after_write_rejections()
+    {
+        var gpu = new SimulatedGpuDevice { RejectWrites = true };
+        var logs = new List<string>();
+        var monitor = new RecoveryMonitor(gpu, () => false, () => false,
+            () => TimeSpan.Zero, (delay, ct) => Task.CompletedTask, logs.Add);
+        var outcome = await monitor.RunAsync(gpu.Current, default);
+        Assert.Equal(RecoveryOutcome.Failed, outcome);
+        Assert.Equal(5, logs.Count(line => line.StartsWith("Recovery attempt", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Disarmed_guard_does_not_write_to_gpu()
+    {
+        var gpu = new SimulatedGpuDevice { RejectWrites = true };
+        var monitor = new RecoveryMonitor(gpu, () => true, () => true,
+            () => TimeSpan.Zero, (delay, ct) => Task.CompletedTask, _ => { });
+        var outcome = await monitor.RunAsync(gpu.Current, default);
+        Assert.Equal(RecoveryOutcome.Disarmed, outcome);
+    }
 }

@@ -213,10 +213,16 @@ public class ExperimentTests
         private readonly SimulatedGpuDevice _inner = new();
         public double HotspotC { get; init; } = 48;
         public int ApplyCalls { get; private set; }
+        private int _telemetryReads;
         public Task<DeviceCapabilities> DiscoverAsync(CancellationToken ct) => _inner.DiscoverAsync(ct);
         public Task<TuningSettings> ReadSettingsAsync(CancellationToken ct) => _inner.ReadSettingsAsync(ct);
         public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
-            => Task.FromResult(new GpuTelemetry(DateTimeOffset.UtcNow, HotspotC, 200, 2800, 2500));
+        {
+            // Pass pre-arm validation; trigger the injected guard after arming,
+            // but before any candidate write is attempted.
+            var temperature = Interlocked.Increment(ref _telemetryReads) == 1 ? 48 : HotspotC;
+            return Task.FromResult(new GpuTelemetry(DateTimeOffset.UtcNow, temperature, 200, 2800, 2500));
+        }
         public Task ApplyAsync(TuningSettings settings, CancellationToken ct)
         {
             ApplyCalls++;

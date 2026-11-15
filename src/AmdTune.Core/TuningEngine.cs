@@ -153,7 +153,9 @@ public sealed class TuningEngine(
             started, DateTimeOffset.UtcNow, phase,
             original ?? new TuningSettings(0, 0, MemoryTimingMode.Default),
             trialResults, phase == RunPhase.Completed
-                ? "Only tested workloads passed. No long-term stability claim."
+                ? (capabilities?.IsSimulation == true
+                    ? "SIMULATION ONLY: no real GPU stability or performance verified."
+                    : "Only specified workloads passed. No long-term stability claim.")
                 : "No settings approved.",
             rollbackVerified, error);
         try { await audit.SaveAsync(report, CancellationToken.None); }

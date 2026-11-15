@@ -31,6 +31,9 @@ function displayReport(report) {
   for (const trial of report.trials) {
     lines.push('  ' + trial.settings.voltageOffsetMv + ' mV, ' + trial.settings.memoryClockMhz +
       ' MHz: ' + trial.verdict + ' — ' + trial.reason);
+    if (trial.comparisons) for (const comparison of trial.comparisons) {
+      lines.push('    ' + comparison.kind + ': ' + comparison.percentChange.toFixed(2) + '% versus A/B/A reference; drift ' + comparison.referenceDriftPercent.toFixed(2) + '%');
+    }
   }
   if (report.error) lines.push('Error: ' + report.error);
   value('report', lines.join('\n'));

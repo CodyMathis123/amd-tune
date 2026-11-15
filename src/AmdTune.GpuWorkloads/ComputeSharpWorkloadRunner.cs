@@ -14,7 +14,7 @@ public sealed class ComputeSharpWorkloadRunner(IGpuDevice device) : IWorkloadRun
 {
     public async Task<WorkloadMeasurement> RunAsync(WorkloadKind kind, int seed, CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindowsVersionAtLeast(6, 2))
             throw new PlatformNotSupportedException("The DX12 workloads require Windows.");
         var caps = await device.DiscoverAsync(cancellationToken);
         var gpu = GraphicsDevice.GetDefault();
@@ -76,7 +76,7 @@ public sealed class ComputeSharpWorkloadRunner(IGpuDevice device) : IWorkloadRun
 
 [ThreadGroupSize(DefaultThreadGroupSizes.X)]
 [GeneratedComputeShaderDescriptor]
-[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("windows6.2")]
 internal readonly partial struct CheckKernel(ReadWriteBuffer<int> buffer, int rounds) : IComputeShader
 {
     public void Execute()

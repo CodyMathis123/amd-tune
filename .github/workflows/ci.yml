@@ -53,3 +53,24 @@ jobs:
             artifacts/web
             artifacts/recovery
           retention-days: 7
+
+  native-build:
+    name: Official ADLX 2.0 bridge compilation
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch AMD SDK source (under AMD license)
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/ADLX.git third_party/ADLX
+      - name: Build native adapter with MSVC
+        shell: cmd
+        run: |
+          for /f "delims=" %%i in ('"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath') do set "VS_INSTALL=%%i"
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64
+          pwsh -NoProfile -File scripts/build-native.ps1 -AdlxSdkDirectory third_party/ADLX
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amd-adlx-bridge-unsigned-dev
+          path: artifacts/native/AmdTune.AdlxBridge.exe
+          retention-days: 7

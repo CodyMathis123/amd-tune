@@ -24,12 +24,16 @@ try
         ?? throw new InvalidDataException("Malformed recovery lease.");
     if (!Path.IsPathFullyQualified(lease.BridgeExecutable) || !File.Exists(lease.BridgeExecutable))
         throw new InvalidDataException("Recovery lease has no usable bridge.");
-    var bridge = new AdlxBridgeGpuDevice(new BridgeProcess(lease.BridgeExecutable));
+    // Diagnostic leases use the real watchdog lifecycle but prohibit AMD tuning
+    // operations, even if the parent exits during a no-write smoke test.
+    IGpuDevice device = lease.DiagnosticOnly
+        ? new DiagnosticNoWriteGpuDevice()
+        : new AdlxBridgeGpuDevice(new BridgeProcess(lease.BridgeExecutable));
 
     // Signal readiness only when lease contents and bridge location have been validated.
     await File.WriteAllTextAsync(leaseFile + ".ready", "ready");
-    Log("Guard armed, monitoring pid " + lease.ParentProcessId);
-    var monitor = new RecoveryMonitor(bridge,
+    Log("Guard armed, monitoring pid " + lease.ParentProcessId + (lease.DiagnosticOnly ? " (DIAGNOSTIC ONLY, no GPU writes)" : ""));
+    var monitor = new RecoveryMonitor(device,
         () => IsProcessAlive(lease.ParentProcessId),
         () => File.Exists(leaseFile + ".done"),
         () => DateTime.UtcNow - File.GetLastWriteTimeUtc(leaseFile),
@@ -48,4 +52,16 @@ static bool IsProcessAlive(int pid)
 {
     try { using var process = Process.GetProcessById(pid); return !process.HasExited; }
     catch (ArgumentException) { return false; }
+}
+
+file sealed class DiagnosticNoWriteGpuDevice : IGpuDevice
+{
+    public Task<DeviceCapabilities> DiscoverAsync(CancellationToken cancellationToken)
+        => throw new SafetyException("Diagnostic watchdog forbids AMD device discovery.");
+    public Task<TuningSettings> ReadSettingsAsync(CancellationToken cancellationToken)
+        => throw new SafetyException("Diagnostic watchdog forbids AMD device readback.");
+    public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken cancellationToken)
+        => throw new SafetyException("Diagnostic watchdog forbids AMD telemetry.");
+    public Task ApplyAsync(TuningSettings settings, CancellationToken cancellationToken)
+        => throw new SafetyException("Diagnostic watchdog forbids hardware writes.");
 }

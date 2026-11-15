@@ -48,7 +48,16 @@ jobs:
       - name: Publish local UI
         run: dotnet publish src/AmdTune.Web/AmdTune.Web.csproj -c Release -r win-x64 --self-contained false -o artifacts/web
       - name: Publish independent recovery guard
-        run: dotnet publish src/AmdTune.Recovery/AmdTune.Recovery.csproj -c Release -r win-x64 --self-contained false -o artifacts/recovery
+        run: dotnet publish src/AmdTune.Recovery/AmdTune.Recovery.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o artifacts/recovery
+      - name: Assert standalone recovery executable starts without managed sidecars
+        shell: pwsh
+        run: |
+          $recoveryCheck = (Resolve-Path "artifacts/recovery/AmdTune.Recovery.exe").Path
+          & $recoveryCheck --self-check
+          if ($LASTEXITCODE -ne 0) { throw "Recovery runtime self-check failed." }
+          if (Test-Path "artifacts/recovery/AmdTune.Recovery.dll") {
+            throw "Expected a single-file independent recovery executable."
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: unsigned-windows-dev-build
@@ -107,6 +116,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path "artifacts/bundle" | Out-Null
           Copy-Item -Path (Join-Path $app '*') -Destination "artifacts/bundle" -Force -Recurse
           Copy-Item -Path $recovery -Destination "artifacts/bundle/AmdTune.Recovery.exe" -Force
+          $recoveryCheck = (Resolve-Path "artifacts/bundle/AmdTune.Recovery.exe").Path
+          & $recoveryCheck --self-check
+          if ($LASTEXITCODE -ne 0) { throw "Bundled independent recovery executable cannot run." }
           Copy-Item -Path $bridge -Destination "artifacts/bundle/AmdTune.AdlxBridge.exe" -Force
           foreach ($file in @("AmdTune.Web.exe", "AmdTune.Web.dll", "AmdTune.Recovery.exe", "AmdTune.AdlxBridge.exe")) {
             if (!(Test-Path (Join-Path "artifacts/bundle" $file))) { throw "Incomplete bundle, missing $file" }
@@ -158,6 +170,9 @@ jobs:
           finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Verify guard process can acknowledge and disarm a diagnostic-only lease
+        shell: pwsh
+        run: ./scripts/smoke-recovery.ps1 -AppDirectory artifacts/bundle
       - name: Publish complete unsigned development package
         uses: actions/upload-artifact@v4
         with:

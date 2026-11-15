@@ -38,6 +38,20 @@ Interpretation: native ADLX discovery, capability ranges, configured settings re
 
 The initial browser launch returned HTTP 404 for `/` because the host assumed the current working directory contained `wwwroot`. This is separate from successful ADLX discovery. The host has been fixed to resolve packaged UI assets relative to the application; CI now smoke-tests `/`, `/app.js`, and `/styles.css` from an unrelated working directory. **Gate 0 browser validation must still be repeated after the fixed build is installed.**
 
+## Gate 0B — Independent recovery process startup (no GPU writes)
+
+An actual RX 9070 XT operator run produced a failed experiment report (2026-11-15):
+`SafetyException: Recovery process did not acknowledge readiness`, with zero trials and rollback unverified. This is an early safety stop: the experiment did not reach a tuning write. Root-cause code review identified the development bundle copying only the framework-dependent recovery .exe without its runtime/dependency files.
+
+**Fix:** publish the recovery guard as a framework-dependent single-file .NET executable and test startup from the final bundled location. Gate 0B must pass before any further experimental hardware writes.
+
+The package CI now runs the recovery executable's no-write `--self-check` and a watchdog lease/disarm handshake with its actual process. After installing the fixed bundle locally, run:
+
+    ./artifacts/app/AmdTune.Recovery.exe --self-check
+    ./scripts/smoke-recovery.ps1 -AppDirectory artifacts/app
+
+Expected: `RECOVERY_RUNTIME_OK` and `RECOVERY_HANDSHAKE_PASS`. The handshake starts a recovery process with the parent alive, checks the readiness file, then disarms it; it does not intentionally call the AMD bridge or modify the GPU. Do not forcibly kill the parent during this diagnostic.
+
 ## Gate 1 — conservative first write (will modify hardware)
 
 Only proceed after verifying Gate 0. Stop other tuning tools (Adrenalin's manual profile editor, MSI Afterburner, etc.). Save important work. Real GPU instability may reset the display driver or system.

@@ -14,7 +14,7 @@ public sealed class SimulationRollbackGuard : IRollbackGuard
 }
 
 public sealed record RecoveryLease(
-    int ParentProcessId, string BridgeExecutable, TuningSettings Baseline, DateTimeOffset StartedAt);
+    int ParentProcessId, string BridgeExecutable, TuningSettings Baseline, DateTimeOffset StartedAt, bool DiagnosticOnly = false);
 
 /// <summary>
 /// Coordinates an independent recovery executable. The guard survives parent process crashes.

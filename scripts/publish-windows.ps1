@@ -5,9 +5,15 @@ Push-Location (Join-Path $PSScriptRoot "..")
 try {
   dotnet publish src/AmdTune.Web/AmdTune.Web.csproj -c $Configuration -r win-x64 --self-contained false -o artifacts/app
   if ($LASTEXITCODE -ne 0) { throw "Web build failed." }
-  dotnet publish src/AmdTune.Recovery/AmdTune.Recovery.csproj -c $Configuration -r win-x64 --self-contained false -o artifacts/recovery
+  dotnet publish src/AmdTune.Recovery/AmdTune.Recovery.csproj -c $Configuration -r win-x64 --self-contained false -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o artifacts/recovery
   if ($LASTEXITCODE -ne 0) { throw "Recovery build failed." }
-  Copy-Item artifacts/recovery/AmdTune.Recovery.exe artifacts/app/ -Force
+  $recoveryExe = (Resolve-Path "artifacts/recovery/AmdTune.Recovery.exe").Path
+  & $recoveryExe --self-check
+  if ($LASTEXITCODE -ne 0) { throw "Independent recovery executable failed no-write runtime self-check." }
+  Copy-Item $recoveryExe artifacts/app/ -Force
+  $appRecoveryExe = (Resolve-Path "artifacts/app/AmdTune.Recovery.exe").Path
+  & $appRecoveryExe --self-check
+  if ($LASTEXITCODE -ne 0) { throw "Independent recovery executable failed after copying into the app directory." }
   $sourceBridge = "artifacts/native/AmdTune.AdlxBridge.exe"
   $appBridge = "artifacts/app/AmdTune.AdlxBridge.exe"
   if (Test-Path $sourceBridge) {

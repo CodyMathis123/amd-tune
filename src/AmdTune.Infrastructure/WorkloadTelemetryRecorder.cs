@@ -24,7 +24,7 @@ public sealed class WorkloadTelemetryRecorder(IGpuDevice device, TimeSpan? readO
             await sampler.StopAsync();
             throw;
         }
-        var evidence = await sampler.StopAsync();
+        var evidence = await sampler.StopAsync(result.HostTimedWindow);
         return result with { TelemetryEvidence = evidence };
     }
 }

@@ -252,6 +252,23 @@ final driver readback. No writes or automatic tuning. Report stored under
 Only run this diagnostic when the system is otherwise idle and save work
 first, because real GPU workloads are executed.
 
+
+## Physical telemetry comparison: PASS, but sampling artifacts remain (November 15, 2026)
+
+Operator ran stock RX 9070 XT at driver settings `0 mV / 2518 MHz VRAM / Default timings`. Read-only ABBA/BAAB telemetry crossover finished `GPU_MONITOR_COMPARE_PASS` for **all 24 measurements**, with zero detected GPU mismatches. Original and final ADLX tuning readback matched. Audit: `b28362ca9abe42f5b68167085092757a.comparison.json`.
+
+| Workload | 125ms score (mean, synthetic elements/s) | 125ms CV | 500ms score (mean) | 500ms CV | 500-vs-125 |
+|---|---:|---:|---:|---:|---:|
+| Compute | 11.975 billion/s | 1.21% | 11.349 billion/s | 4.96% | -5.23% |
+| Memory | 11.681 billion/s | 3.04% | 11.707 billion/s | 2.07% | +0.22% |
+| Mixed | 13.559 billion/s | 4.49% | 13.612 billion/s | 4.96% | +0.38% |
+
+125ms sampling produced 21/24/21 distinct ADLX observations across four runs in each kind, versus 8/8/8 at 500ms. Memory and Mixed show almost no average difference, while Compute appears faster *with more frequent* polling. **Do not infer causality**: only four observations per condition, synthetic *host* timing, and nonstationary utilization (Compute observed ADLX means from 11% through 100%).
+
+The source review found a concrete evidence-contamination path: the sampler is started before `SustainedGpuBenchmarkRunner.RunAsync` performs ADLX device discovery, CPU reference calculations, 128MiB allocations, shader warmup, and final CPU correctness checks. Therefore, even correct telemetry observations may come from **outside the actual timed GPU dispatch/readback interval**, artificially depressing average utilization and corrupting performance-per-watt inference.
+
+This iteration adds `HostTimedWindow` start/end timestamps captured directly around the sustained runner's timed dispatch plus GPU buffer readback (not native GPU queue timestamps). The telemetry collector continues to observe and enforce hotspot safety across **all** readings, retaining every snapshot in the raw audit, but uses only readings falling inside the host-timed interval for exploratory active-load power/clock summaries. It records total observations and in-window observations separately. Tests cover time-window filtering and invalid bounds. This change does not enable automated tuning, prove efficiency, or eliminate ADLX internal averaging/latency. Proper D3D12 GPU timestamp query implementation remains the next timing milestone.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

@@ -169,6 +169,7 @@ if (compareTelemetry)
                         $"correct={result.Correct}, errors={result.Mismatches}, " +
                         $"score={result.Score:N0}, window={result.ElapsedMilliseconds:F1}ms, " +
                         $"distinct ADLX={diag?.DistinctMetricSamples ?? 0}, " +
+                    $"in timed host window={diag?.SamplesWithinHostTimedWindow ?? 0}/{result.TelemetryEvidence?.SampleCount ?? 0}, " +
                         $"utilization mean={diag?.MeanUtilizationPercent?.ToString("F1") ?? "missing"}%");
                     if (!result.ExecutedOnGpu || !result.Correct || result.Mismatches != 0)
                         throw new HardwareException(
@@ -302,6 +303,10 @@ if (args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase))
                     $"{diagnostics?.RawSamples ?? 0}; repeated={diagnostics?.RepeatedMetricSamples ?? 0}; " +
                     $"mean metric publication interval=" +
                     $"{diagnostics?.MeanObservedMetricIntervalMs?.ToString("F0") ?? "unknown"} ms");
+                Console.WriteLine($"ADLX during timed host window: " +
+                    $"{diagnostics?.SamplesWithinHostTimedWindow ?? 0}/{result.TelemetryEvidence?.SampleCount ?? 0}; " +
+                    $"unique source samples={diagnostics?.DistinctSamplesWithinHostTimedWindow ?? 0}; " +
+                    $"scoped={diagnostics?.HasHostTimedWindow ?? false}");
                 Console.WriteLine($"ADLX samples={result.TelemetryEvidence?.SampleCount ?? 0}; " +
                     $"active samples={result.TelemetryEvidence?.ActiveSamples ?? 0}; " +
                     $"loaded mean power={result.TelemetryEvidence?.MeanActiveBoardPowerW?.ToString("F1") ?? "not measured"} W");

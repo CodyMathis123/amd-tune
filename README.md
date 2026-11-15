@@ -81,6 +81,18 @@ If you already have third_party/ADLX, skip the clone and keep the pinned revisio
 
 The UI shows actual ADLX capabilities, raw driver limits and device name; candidates cannot be submitted.
 
+### Telemetry evidence scoped to the timed GPU workload phase
+
+The sustained read-only run now records the actual host-side timing envelope
+around shader dispatch plus GPU readback. ADLX sampling and thermal protection
+still cover the *entire* workload invocation (including setup and CPU checking),
+but loaded-performance evidence uses only source observations taken during
+the marked host-timed GPU phase. Raw data and total sample counts are
+preserved. The audit reports `in timed host window=...` separately
+from total ADLX snapshots; CPU setup samples can no longer masquerade
+as active GPU measurements. This is not GPU queue timestamp timing,
+and AMD's metrics may include averaged or delayed observations.
+
 ### Paired stock telemetry comparison — ABBA/BAAB read-only
 
 To avoid reading too much into a single 125ms versus 500ms comparison,

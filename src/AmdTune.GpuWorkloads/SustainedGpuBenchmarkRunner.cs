@@ -76,6 +76,9 @@ public sealed class SustainedGpuBenchmarkRunner(IGpuDevice device) : IWorkloadRu
         DispatchPass();
         DispatchPass();
 
+        // Capture only the timed dispatch/readback phase, excluding adapter
+        // discovery, CPU reference setup, buffer creation, warmup and CPU oracle.
+        var hostWindowStart = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         int measuredPasses = 0;
         // Respect maximum dispatch count even on very fast GPUs.
@@ -94,6 +97,7 @@ public sealed class SustainedGpuBenchmarkRunner(IGpuDevice device) : IWorkloadRu
         data.CopyTo(resultData);
         errors.CopyTo(sticky);
         stopwatch.Stop();
+        var hostWindowEnd = DateTimeOffset.UtcNow;
         cancellationToken.ThrowIfCancellationRequested();
         long mismatches = 0;
         for (int i = 0; i < count; i++)
@@ -114,7 +118,8 @@ public sealed class SustainedGpuBenchmarkRunner(IGpuDevice device) : IWorkloadRu
             $"DX12: {gpu.Name}; sustained target={TargetWindowMilliseconds}ms; " +
             $"measured passes={measuredPasses}; bounded dispatches/pass={dispatches.Count}; " +
             $"sticky intermediate-error flags + all {count:N0} final elements CPU-checked; " +
-            "warmup=2 passes; not GPU timestamp timing or long-term stability.");
+            "warmup=2 passes; not GPU timestamp timing or long-term stability.",
+            HostTimedWindow: new HostTimedWindow(hostWindowStart, hostWindowEnd));
     }
 }
 

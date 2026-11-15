@@ -397,4 +397,78 @@ public class BenchmarkEvidenceTests
         return items.ToArray();
     }
 
+    [Fact]
+    public async Task Host_window_scopes_power_evidence_but_keeps_all_raw_safety_telemetry()
+    {
+        var device = new ScopedTelemetryDevice();
+        using var work = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(
+            device, 90, work, TimeSpan.FromMilliseconds(125));
+        sampler.Start();
+        await device.FirstTwo.WaitAsync(TimeSpan.FromSeconds(3));
+        // First two high-utilization samples occurred outside GPU timed window.
+        var start = DateTimeOffset.UtcNow;
+        await device.SixSamples.WaitAsync(TimeSpan.FromSeconds(3));
+        var end = DateTimeOffset.UtcNow;
+        var evidence = await sampler.StopAsync(new HostTimedWindow(start, end));
+        Assert.True(evidence.SampleCount >= 6);
+        Assert.NotNull(evidence.Diagnostics);
+        Assert.True(evidence.Diagnostics.HasHostTimedWindow);
+        Assert.True(evidence.Diagnostics.SamplesWithinHostTimedWindow >= 2);
+        Assert.True(evidence.Diagnostics.SamplesWithinHostTimedWindow < evidence.SampleCount);
+        // Only low-utilization samples are inside the timed region.
+        Assert.Equal(0, evidence.ActiveSamples);
+        Assert.False(evidence.HasUsefulLoadEvidence);
+        Assert.Equal(evidence.SampleCount, evidence.Samples.Count);
+        Assert.False(work.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task Invalid_host_window_cannot_produce_passing_load_evidence()
+    {
+        var device = new ScopedTelemetryDevice();
+        using var work = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(
+            device, 90, work, TimeSpan.FromMilliseconds(125));
+        sampler.Start();
+        await device.FirstTwo.WaitAsync(TimeSpan.FromSeconds(3));
+        var invalid = new HostTimedWindow(
+            DateTimeOffset.UtcNow.AddMinutes(2),
+            DateTimeOffset.UtcNow.AddMinutes(1));
+        await Assert.ThrowsAsync<SafetyException>(() => sampler.StopAsync(invalid));
+    }
+
+    private sealed class ScopedTelemetryDevice : IGpuDevice, IStreamingGpuTelemetryDevice
+    {
+        private readonly SimulatedGpuDevice _stub = new();
+        private readonly TaskCompletionSource<bool> _firstTwo =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _six =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task FirstTwo => _firstTwo.Task;
+        public Task SixSamples => _six.Task;
+        public Task<DeviceCapabilities> DiscoverAsync(CancellationToken ct)
+            => _stub.DiscoverAsync(ct);
+        public Task<TuningSettings> ReadSettingsAsync(CancellationToken ct)
+            => _stub.ReadSettingsAsync(ct);
+        public Task ApplyAsync(TuningSettings s, CancellationToken ct)
+            => throw new SafetyException("Read-only fixture must never write GPU settings.");
+        public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
+            => throw new HardwareException("Unexpected snapshot call.");
+        public async IAsyncEnumerable<GpuTelemetry> StreamTelemetryAsync(
+            TimeSpan interval,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            for (int i = 0; !ct.IsCancellationRequested; i++)
+            {
+                yield return new GpuTelemetry(
+                    DateTimeOffset.UtcNow, 45, 130, 1800, 1200,
+                    i < 2 ? 95 : 20, 10_000 + i * 125);
+                if (i == 1) _firstTwo.TrySetResult(true);
+                if (i == 5) _six.TrySetResult(true);
+                await Task.Delay(20, ct);
+            }
+        }
+    }
+
 }

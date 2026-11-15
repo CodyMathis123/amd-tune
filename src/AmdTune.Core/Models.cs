@@ -42,7 +42,19 @@ public sealed record WorkloadMeasurement(
     string ScoreUnit,
     double ElapsedMilliseconds,
     string Detail,
-    WorkloadTelemetryEvidence? TelemetryEvidence = null);
+    WorkloadTelemetryEvidence? TelemetryEvidence = null,
+    HostTimedWindow? HostTimedWindow = null);
+
+/// <summary>
+/// Host clock timestamps surrounding GPU dispatch submission and buffer readback;
+/// this window is NOT calibrated GPU execution time or device command timestamps.
+/// </summary>
+public sealed record HostTimedWindow(DateTimeOffset StartedAt, DateTimeOffset FinishedAt)
+{
+    public bool Contains(DateTimeOffset capturedAt) =>
+        capturedAt >= StartedAt && capturedAt <= FinishedAt;
+}
+
 
 /// <summary>
 /// ADLX snapshots around a workload. Sampling is asynchronous and NOT aligned
@@ -59,7 +71,8 @@ public sealed record WorkloadTelemetryEvidence(
     double? MeanActiveUtilizationPercent,
     double? MeanActiveCoreClockMhz,
     IReadOnlyList<GpuTelemetry> Samples,
-    TelemetrySampleDiagnostics? Diagnostics = null)
+    TelemetrySampleDiagnostics? Diagnostics = null,
+    HostTimedWindow? HostTimedWindow = null)
 {
     public bool HasUsefulLoadEvidence => ActiveSamples >= 3 &&
         MeanActiveBoardPowerW is > 0 && MeanActiveCoreClockMhz is > 0;
@@ -79,7 +92,10 @@ public sealed record TelemetrySampleDiagnostics(
     double? MeanUtilizationPercent,
     double? MeanObservedMetricIntervalMs,
     int PositiveClockSamples,
-    int PositiveUtilizationSamples);
+    int PositiveUtilizationSamples,
+    int SamplesWithinHostTimedWindow = 0,
+    int DistinctSamplesWithinHostTimedWindow = 0,
+    bool HasHostTimedWindow = false);
 
 public sealed record TrialResult(
     TuningSettings Settings,

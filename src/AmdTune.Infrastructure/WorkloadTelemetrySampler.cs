@@ -74,7 +74,7 @@ public sealed class WorkloadTelemetrySampler(
         if (_samples.Count < 256) _samples.Add(reading);
     }
 
-    public async Task<WorkloadTelemetryEvidence> StopAsync()
+    public async Task<WorkloadTelemetryEvidence> StopAsync(HostTimedWindow? hostWindow = null)
     {
         if (_worker is null) throw new InvalidOperationException("Sampler was never started.");
         _stop.Cancel();
@@ -83,14 +83,27 @@ public sealed class WorkloadTelemetrySampler(
             throw new SafetyException("GPU telemetry sampling failed or exceeded a thermal guard: " + _error.Message);
         var end = DateTimeOffset.UtcNow;
         var samples = _samples.ToArray();
+        if (hostWindow is not null &&
+            (hostWindow.FinishedAt < hostWindow.StartedAt ||
+             hostWindow.StartedAt < _started ||
+             hostWindow.FinishedAt > end))
+            throw new SafetyException("Invalid host measurement-window bounds for GPU telemetry evidence.");
+        // Preserve all readings for audit and thermal limits. Use only readings
+        // captured within the host-timed GPU dispatch/readback phase for
+        // exploratory loaded power and utilization evidence. Native ADLX
+        // metrics may lag or aggregate over a wider interval: this is an
+        // approximation, NOT synchronized GPU-side timing.
+        var windowSamples = hostWindow is null
+            ? samples
+            : samples.Where(s => hostWindow.Contains(s.At)).ToArray();
         // ADLX may publish metrics less often than this helper requests them.
-        // When the actual source timestamp is available, do not count a
-        // repeated reading as an independent active sample.
-        var timestamped = samples.Where(s => s.MetricTimestampMs is > 0).ToArray();
-        var allTimestamped = timestamped.Length == samples.Length && samples.Length > 0;
+        // When the source timestamp is available, don't count repeats as
+        // separate independent telemetry observations.
+        var timestamped = windowSamples.Where(s => s.MetricTimestampMs is > 0).ToArray();
+        var allTimestamped = timestamped.Length == windowSamples.Length && windowSamples.Length > 0;
         var independent = allTimestamped
-            ? samples.GroupBy(s => s.MetricTimestampMs!.Value).Select(g => g.First()).ToArray()
-            : samples;
+            ? windowSamples.GroupBy(s => s.MetricTimestampMs!.Value).Select(g => g.First()).ToArray()
+            : windowSamples;
         var active = independent.Where(s => s.UtilizationPercent is >= 50 and <= 100 &&
                                              s.CoreClockMhz is > 0).ToArray();
         var utilization = independent.Where(s => s.UtilizationPercent is >= 0 and <= 100)
@@ -110,7 +123,10 @@ public sealed class WorkloadTelemetrySampler(
             utilization.Length > 0 ? utilization.Average() : null,
             intervals.Length > 0 ? intervals.Average() : null,
             independent.Count(s => s.CoreClockMhz is > 0),
-            independent.Count(s => s.UtilizationPercent is > 0 and <= 100));
+            independent.Count(s => s.UtilizationPercent is > 0 and <= 100),
+            windowSamples.Length,
+            independent.Length,
+            hostWindow is not null);
         static double? MeanOrNull(IEnumerable<double> values)
         {
             var v = values.Where(double.IsFinite).ToArray();
@@ -126,7 +142,8 @@ public sealed class WorkloadTelemetrySampler(
             MeanOrNull(active.Select(s => s.UtilizationPercent!.Value)),
             MeanOrNull(active.Select(s => (double)s.CoreClockMhz!.Value)),
             samples,
-            diagnostic);
+            diagnostic,
+            hostWindow);
     }
 
     public async ValueTask DisposeAsync()

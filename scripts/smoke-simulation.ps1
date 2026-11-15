@@ -15,6 +15,12 @@ try {
   }
   if ($null -eq $info) { throw "Web did not start on localhost." }
   if ($info.mode -ne "simulation") { throw "Unsafe mode: simulation required." }
+  foreach ($resource in @("/", "/index.html", "/app.js", "/styles.css")) {
+    $response = Invoke-WebRequest -Uri "$base$resource" -UseBasicParsing
+    if ($response.StatusCode -ne 200 -or !$response.Content) {
+      throw "Static UI resource $resource was not served."
+    }
+  }
   $gpu = Invoke-RestMethod "$base/api/discover"
   $original = Invoke-RestMethod "$base/api/settings"
   if (!$gpu.isSimulation) { throw "Simulation reported a physical GPU." }

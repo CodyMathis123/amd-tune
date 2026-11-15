@@ -126,6 +126,38 @@ jobs:
             Sort-Object Name |
             ForEach-Object { $h = Get-FileHash $_.FullName -Algorithm SHA256; "$($h.Hash)  $($_.Name)" }
           $hashLines | Set-Content -Encoding utf8 "artifacts/bundle/SHA256SUMS.txt"
+      - name: Smoke-test published bundle from unrelated working directory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = (Resolve-Path "artifacts/bundle/AmdTune.Web.exe").Path
+          $probeRoot = Join-Path $env:RUNNER_TEMP "amd-tune-external-cwd"
+          New-Item -ItemType Directory -Force -Path $probeRoot | Out-Null
+          $process = Start-Process -FilePath $app -WorkingDirectory $probeRoot -PassThru
+          try {
+            $base = "http://127.0.0.1:5783"
+            $info = $null
+            for ($i = 0; $i -lt 40; $i++) {
+              try { $info = Invoke-RestMethod "$base/api/info"; break }
+              catch { Start-Sleep -Milliseconds 300 }
+            }
+            if ($null -eq $info) { throw "Published app did not serve /api/info." }
+            if ($info.mode -ne "simulation") { throw "Safety regression: published app is not simulated by default." }
+            foreach ($resource in @("/", "/index.html", "/app.js", "/styles.css")) {
+              $response = Invoke-WebRequest -Uri "$base$resource" -UseBasicParsing
+              if ($response.StatusCode -ne 200 -or !$response.Content) {
+                throw "Published static asset $resource is not served correctly."
+              }
+              Write-Host "PASS $resource : HTTP 200"
+            }
+            if (!(Test-Path "artifacts/bundle/wwwroot/index.html")) {
+              throw "Published bundle missing wwwroot/index.html"
+            }
+            Write-Host "PASS: published bundle serves UI and API from unrelated working directory."
+          }
+          finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Publish complete unsigned development package
         uses: actions/upload-artifact@v4
         with:

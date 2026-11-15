@@ -4,7 +4,35 @@ using AmdTune.GpuWorkloads;
 using AmdTune.Infrastructure;
 using AmdTune.Web;
 
-var builder = WebApplication.CreateBuilder(args);
+// Resolve UI assets independently of the shell's working directory. A published app
+// carries wwwroot beside its executable; local dotnet builds may use project assets.
+static string FindContentRoot(string baseDirectory)
+{
+    string[] candidates =
+    [
+        baseDirectory,
+        Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", ".."))
+    ];
+    foreach (var candidate in candidates)
+    {
+        if (File.Exists(Path.Combine(candidate, "wwwroot", "index.html")) &&
+            File.Exists(Path.Combine(candidate, "wwwroot", "app.js")) &&
+            File.Exists(Path.Combine(candidate, "wwwroot", "styles.css")))
+            return candidate;
+    }
+
+    throw new DirectoryNotFoundException(
+        "AMD Tune UI assets missing (wwwroot/index.html, app.js, styles.css). " +
+        "Re-publish the complete app; do not launch from an incomplete deployment.");
+}
+
+var contentRoot = FindContentRoot(AppContext.BaseDirectory);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = contentRoot,
+    WebRootPath = "wwwroot"
+});
 builder.WebHost.UseUrls("http://127.0.0.1:5783");
 var hardware = args.Contains("--hardware", StringComparer.OrdinalIgnoreCase);
 var writeRequested = args.Contains("--enable-hardware-writes", StringComparer.OrdinalIgnoreCase);

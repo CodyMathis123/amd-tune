@@ -133,6 +133,26 @@ Only proceed after verifying Gate 0. Stop other tuning tools (Adrenalin's manual
 
 Only AFTER the initial -15 mV test, rollback, and recovery fault-injection have passed, return to stock voltage, choose **Preview conservative VRAM sweep**, and review the +25/+50/+75 MHz candidates. These are small hardware overclocks, not risk-free. The app must restore stock after each candidate and report performance changes, noise and correctness; a performance knee must **never** be called proven ECC activity. Do not combine a VRAM sweep with a core undervolt in the first hardware session.
 
+## Gate 1 — First physical -15 mV trial completed (November 15, 2026)
+
+User-supplied report ID `27090c55-1ae9-4a37-9785-5532c2a7b914` from Windows RX 9070 XT:
+
+- Lifecycle phase **Completed** (7), trial verdict **Inconclusive** (2), not Rejected.
+- Candidate: -15 mV offset; VRAM 2518 MHz; Default timings. One candidate; A/B/A repeated three times per phase; ~19 seconds end-to-end.
+- Candidate workload correctness: nine GPU-executed passes, every output correct, zero mismatches. Not a long-term stability claim.
+- `RollbackVerified=true` and `Error=null`: original settings restored and driver readback verified by the main process. Separate recovery *after parent termination* remains unverified.
+- Candidate telemetry recorded hotspot 24 C, board power 13 W, idle-like core clock 0 MHz. This is not useful sustained loaded power/temperature evidence.
+
+| Workload | Before stock mean (million checked elements/s) | Candidate -15 mV mean | After stock mean | Stock before-to-after drift | Candidate CV |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Compute | 193.63 | 184.44 | 182.58 | -5.71% | 2.46% |
+| Memory | 529.87 | 493.41 | 394.09 | **-25.62%** | **11.02%** |
+| Mixed | 340.82 | 378.36 | 347.35 | +1.91% | 7.27% |
+
+**Result:** First actual nonpersistent -15 mV trial executed, checked outputs, and restored original settings. The reported before/after *stock* drift alone is too large to infer a tuning benefit. Workloads were measured over just 5–77 ms including transfers; these are not calibrated GPU-only bandwidth or full-load efficiency metrics.
+
+**Next method improvements before optimization:** warmup, longer sustained work, isolate GPU-only timing from readback/transfer overhead, sample power/clocks/temperature during GPU activity, and treat correctness, stability, and performance confidence as separate outcomes. Increasing repetitions from 3 to 7 improves the sample count but cannot eliminate systematic drift from timed sequence or cold/warm state. Do not sweep voltage or VRAM on the current performance evidence.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

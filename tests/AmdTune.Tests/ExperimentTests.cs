@@ -231,4 +231,43 @@ public class ExperimentTests
     }
 
 
+    [Fact]
+    public void Completed_but_noisy_hardware_trial_is_not_misreported_as_approved()
+    {
+        var candidate = new TrialResult(
+            new TuningSettings(-15, 2518, MemoryTimingMode.Default),
+            TrialVerdict.Inconclusive,
+            "Excessive reference drift or benchmark noise.",
+            [],
+            null,
+            DateTimeOffset.UtcNow);
+        var summary = RunReportSummary.Describe(
+            RunPhase.Completed, false, [candidate], true);
+        Assert.Contains("INCONCLUSIVE", summary);
+        Assert.Contains("restored", summary);
+        Assert.DoesNotContain("Only specified workloads passed", summary);
+    }
+
+    [Fact]
+    public void Completed_hardware_trial_without_verified_rollback_is_never_approved()
+    {
+        var candidate = new TrialResult(
+            new TuningSettings(-15, 2518, MemoryTimingMode.Default),
+            TrialVerdict.Accepted,
+            "Short GPU workloads passed.",
+            [],
+            null,
+            DateTimeOffset.UtcNow);
+        var summary = RunReportSummary.Describe(
+            RunPhase.Completed, false, [candidate], false);
+        Assert.Contains("NOT verified", summary);
+        Assert.Contains("No settings approved", summary);
+    }
+
+    [Fact]
+    public void Completed_simulation_cannot_be_reported_as_real_gpu_validation()
+    {
+        Assert.Contains("SIMULATION ONLY", RunReportSummary.Describe(RunPhase.Completed, true, [], true));
+    }
+
 }

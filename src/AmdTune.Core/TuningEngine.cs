@@ -182,11 +182,9 @@ public sealed class TuningEngine(
             capabilities?.IsSimulation ?? false,
             started, DateTimeOffset.UtcNow, phase,
             original ?? new TuningSettings(0, 0, MemoryTimingMode.Default),
-            trialResults, phase == RunPhase.Completed
-                ? (capabilities?.IsSimulation == true
-                    ? "SIMULATION ONLY: no real GPU stability or performance verified."
-                    : "Only specified workloads passed. No long-term stability claim.")
-                : "No settings approved.",
+            trialResults,
+            RunReportSummary.Describe(phase, capabilities?.IsSimulation ?? false,
+                trialResults, rollbackVerified),
             rollbackVerified, error);
         try { await audit.SaveAsync(report, CancellationToken.None); }
         catch (Exception ex) { throw new IOException("Could not persist audit report.", ex); }

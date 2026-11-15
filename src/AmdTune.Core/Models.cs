@@ -1,0 +1,83 @@
+namespace AmdTune.Core;
+
+public enum MemoryTimingMode { Default, Fast }
+public enum WorkloadKind { Compute, Memory, Mixed }
+public enum RunPhase { Idle, Discovering, Baseline, Applying, Verifying, Benchmarking, RollingBack, Completed, Failed, Cancelled }
+public enum TrialVerdict { Accepted, Rejected, Inconclusive }
+
+public sealed record IntRange(int Min, int Max, int Step = 1)
+{
+    public bool Contains(int value) => Step > 0 && value >= Min && value <= Max && (value - Min) % Step == 0;
+}
+
+public sealed record DeviceCapabilities(
+    string DeviceId,
+    string Name,
+    string Backend,
+    bool IsSimulation,
+    bool CanReadSettings,
+    bool CanWriteSettings,
+    IntRange? VoltageOffsetMv,
+    IntRange? MemoryClockMhz,
+    bool CanSetMemoryTiming,
+    IReadOnlyList<string> Warnings);
+
+public sealed record TuningSettings(int VoltageOffsetMv, int MemoryClockMhz, MemoryTimingMode MemoryTiming);
+public sealed record GpuTelemetry(DateTimeOffset At, double? HotspotC, double? BoardPowerW, int? CoreClockMhz, int? MemoryClockMhz);
+
+public sealed record WorkloadMeasurement(
+    WorkloadKind Kind,
+    bool ExecutedOnGpu,
+    bool Correct,
+    long CheckedElements,
+    long Mismatches,
+    double Score,
+    string ScoreUnit,
+    double ElapsedMilliseconds,
+    string Detail);
+
+public sealed record TrialResult(
+    TuningSettings Settings,
+    TrialVerdict Verdict,
+    string Reason,
+    IReadOnlyList<WorkloadMeasurement> Measurements,
+    GpuTelemetry? Telemetry,
+    DateTimeOffset At);
+
+public sealed record RunProgress(
+    RunPhase Phase,
+    string Message,
+    int CompletedTrials,
+    int TotalTrials,
+    DateTimeOffset At);
+
+public sealed record RunReport(
+    Guid Id,
+    string DeviceName,
+    string Backend,
+    bool Simulated,
+    DateTimeOffset Started,
+    DateTimeOffset Finished,
+    RunPhase Phase,
+    TuningSettings OriginalSettings,
+    IReadOnlyList<TrialResult> Trials,
+    string Verdict,
+    bool RollbackVerified,
+    string? Error);
+
+public sealed record TunePlan(
+    IReadOnlyList<TuningSettings> Candidates,
+    int Repetitions = 3,
+    double MaxHotspotC = 90,
+    int Seed = 49191)
+{
+    public static TunePlan Conservative(TuningSettings original)
+        => new(new[]
+        {
+            original with { VoltageOffsetMv = original.VoltageOffsetMv - 15 },
+            original with { VoltageOffsetMv = original.VoltageOffsetMv - 30 },
+            original with { VoltageOffsetMv = original.VoltageOffsetMv - 45 }
+        });
+}
+
+public sealed record SafetyEnvelope(int MaxUndervoltDeltaMv = 75, int MaxMemoryClockIncreaseMhz = 150, int MaxCandidates = 12, int MaxRepetitions = 9, double AbsoluteHotspotLimitC = 94);

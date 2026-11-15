@@ -10,7 +10,7 @@ Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
 Write-Host "App: $dir"
 Write-Host "Native ADLX bridge: $(Test-Path $bridge)"
 Write-Host "Separate recovery executable: $(Test-Path $guard)"
-if (!(Test-Path $bridge)) { throw "Build native bridge first; see README.md." }
+if (!(Test-Path $bridge)) { throw "Native bridge missing. Run build-native.ps1 -AdlxSdkDirectory ./third_party/ADLX, then publish-windows.ps1, then retry doctor." }
 Write-Host "ADLX capability discovery:"
 & $bridge discover
 if ($LASTEXITCODE -ne 0) { throw "Discovery failed."; }

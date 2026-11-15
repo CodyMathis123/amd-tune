@@ -69,12 +69,9 @@ jobs:
           git clone --depth 1 https://github.com/GPUOpen-LibrariesAndSDKs/ADLX.git third_party/ADLX
           git -C third_party/ADLX fetch --depth 1 origin 32b5a740d42295c5dfe9026b9f52683da0f3af91
           git -C third_party/ADLX checkout --detach 32b5a740d42295c5dfe9026b9f52683da0f3af91
-      - name: Build native adapter with MSVC
-        shell: cmd
-        run: |
-          for /f "delims=" %%i in ('"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath') do set "VS_INSTALL=%%i"
-          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64
-          pwsh -NoProfile -File scripts/build-native.ps1 -AdlxSdkDirectory third_party/ADLX
+      - name: Build bridge in normal PowerShell (auto-detect MSVC)
+        shell: pwsh
+        run: ./scripts/build-native.ps1 -AdlxSdkDirectory third_party/ADLX
       - uses: actions/upload-artifact@v4
         with:
           name: amd-adlx-bridge-unsigned-dev

@@ -156,7 +156,7 @@ public class BenchmarkEvidenceTests
         sampler.Start();
         await gpu.Entered.WaitAsync(TimeSpan.FromSeconds(3));
         await Task.Delay(25);
-        var error = await Assert.ThrowsAsync<SafetyException>(sampler.StopAsync);
+        var error = await Assert.ThrowsAsync<SafetyException>(() => sampler.StopAsync());
         Assert.Contains("ADLX diagnostic failure", error.Message);
         Assert.True(run.IsCancellationRequested);
     }
@@ -469,6 +469,93 @@ public class BenchmarkEvidenceTests
                 await Task.Delay(20, ct);
             }
         }
+    }
+
+    [Fact]
+    public void Five_minute_study_rotates_all_intervals_across_all_workload_kinds()
+    {
+        for (int block = 0; block < 12; block++)
+        {
+            var schedule = ReadOnlyStudy.Schedule(block);
+            Assert.Equal(9, schedule.Count);
+            foreach (var kind in Enum.GetValues<WorkloadKind>())
+                Assert.Equal(new[] { 125, 250, 500 },
+                    schedule.Where(v => v.Kind == kind).Select(v => v.IntervalMs).OrderBy(x => x));
+        }
+        Assert.NotEqual(ReadOnlyStudy.Schedule(0)[0], ReadOnlyStudy.Schedule(1)[0]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => ReadOnlyStudy.Schedule(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ReadOnlyStudy.Schedule(ReadOnlyStudy.MaxBlocks));
+    }
+
+    [Fact]
+    public void Five_minute_study_aggregates_full_blocks_and_discards_one_warmup_block()
+    {
+        var observations = MakeFiveMinuteObservations(blocks: 6);
+        var report = ReadOnlyStudy.Summarize(observations);
+        Assert.Equal(6, report.TotalBlocks);
+        Assert.Equal(1, report.DiscardedWarmupBlocks);
+        Assert.Equal(54, report.TotalMeasurements);
+        Assert.Equal(9, report.Conditions.Count);
+        Assert.Equal(9, report.PairedComparisons.Count);
+        Assert.All(report.Conditions, condition =>
+        {
+            Assert.Equal(6, condition.TotalMeasurements);
+            Assert.Equal(5, condition.ScoredMeasurements);
+            Assert.NotNull(condition.Throughput);
+            Assert.Equal(0, condition.LaterHalfVsEarlyHalfPercent);
+            Assert.Equal(0, condition.ActiveInWindowSamples);
+        });
+        var fiveVs125 = report.PairedComparisons.Single(pair =>
+            pair.Kind == WorkloadKind.Mixed &&
+            pair.ComparisonIntervalMs == 500 &&
+            pair.ReferenceIntervalMs == 125);
+        Assert.Equal(5, fiveVs125.PairedBlocks);
+        Assert.NotNull(fiveVs125.PairedPercentDifferences);
+        Assert.Equal(5.0, fiveVs125.PairedPercentDifferences.Mean, 6);
+        Assert.False(report.Limitations.Count == 0);
+    }
+
+    [Fact]
+    public void Five_minute_study_rejects_partial_or_corrupted_measurements()
+    {
+        var observations = MakeFiveMinuteObservations(blocks: 2);
+        Assert.Throws<ArgumentException>(() => ReadOnlyStudy.Summarize(observations[..^1]));
+        var bad = observations.ToArray();
+        bad[5] = bad[5] with
+        {
+            Measurement = bad[5].Measurement with { Correct = false, Mismatches = 1 }
+        };
+        Assert.Throws<ArgumentException>(() => ReadOnlyStudy.Summarize(bad));
+        var changed = observations.ToArray();
+        changed[0] = changed[0] with { PollIntervalMs = 999 };
+        Assert.Throws<ArgumentException>(() => ReadOnlyStudy.Summarize(changed));
+    }
+
+    private static StudyObservation[] MakeFiveMinuteObservations(int blocks)
+    {
+        var observations = new List<StudyObservation>();
+        var start = DateTimeOffset.UtcNow;
+        for (var block = 0; block < blocks; block++)
+        {
+            var schedule = ReadOnlyStudy.Schedule(block);
+            for (var pos = 0; pos < schedule.Count; pos++)
+            {
+                var (kind, interval) = schedule[pos];
+                double score = interval switch
+                {
+                    125 => 100,
+                    250 => 103,
+                    500 => 105,
+                    _ => throw new InvalidOperationException("Unexpected interval")
+                };
+                var begun = start.AddSeconds((block * schedule.Count + pos) * 2);
+                observations.Add(new StudyObservation(
+                    block, pos, kind, interval, begun, begun.AddMilliseconds(750),
+                    new WorkloadMeasurement(kind, true, true, 1024, 0,
+                        score, "test synthetic elements/s", 750, "mock study workload")));
+            }
+        }
+        return observations.ToArray();
     }
 
 }

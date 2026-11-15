@@ -93,6 +93,42 @@ from total ADLX snapshots; CPU setup samples can no longer masquerade
 as active GPU measurements. This is not GPU queue timestamp timing,
 and AMD's metrics may include averaged or delayed observations.
 
+### Full five-minute read-only performance and telemetry study
+
+The short three-workload checks and eight-slot crossover proved the test
+path works, but are too small to estimate time-dependent variation reliably.
+Run a single **300-second read-only study**:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark --study-seconds 300
+
+- Repeats **complete nine-measurement blocks** (Compute, Memory and Mixed
+  at 125, 250 and 500 ms ADLX polling intervals), balancing the interval
+  order across successive blocks and rotating workload order.
+- Each workload uses the same existing bounded, ~750ms host-measured
+  GPU dispatch/readback window and independently checks all final GPU
+  outputs and sticky error flags. The first complete block is still
+  validated but is **excluded from performance summary statistics** as a
+  warmup block.
+- Samples AMD telemetry throughout each workload, enforcing the 90 C
+  hotspot guard. Loaded evidence is limited to measurements inside the
+  host-timed GPU window; all raw readings are preserved for diagnosis.
+- The report includes means, medians, CV, early/late throughput drift,
+  within-block paired interval comparisons, thermal peaks and sensor
+  coverage. Every block also verifies that driver tuning settings did
+  not change. A failure stops further measurements and still writes an
+  audit of completed observations.
+- Results are stored under `%LOCALAPPDATA%/AmdTune/soaks/` with suffix
+  `.study.json`. Use 120 to 900 seconds if needed; 300 is recommended.
+  The last block finishes before stopping, so total runtime may exceed
+  the requested duration slightly.
+
+**This is not five minutes of uninterrupted full-GPU stress.** CPU
+correctness verification and initial setup occur between GPU windows;
+it does not attempt overclocking, alter the Adrenalin profile, or
+establish long-term stability. Do not compare scores from different
+benchmark profiles. GPU-side timing and dedicated sustained thermal
+stress remain separate follow-up work.
+
 ### Paired stock telemetry comparison — ABBA/BAAB read-only
 
 To avoid reading too much into a single 125ms versus 500ms comparison,

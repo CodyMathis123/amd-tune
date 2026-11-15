@@ -38,6 +38,9 @@ var hardware = args.Contains("--hardware", StringComparer.OrdinalIgnoreCase);
 var writeRequested = args.Contains("--enable-hardware-writes", StringComparer.OrdinalIgnoreCase);
 var verifyGpu = args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase);
 var compareTelemetry = args.Contains("--compare-telemetry", StringComparer.OrdinalIgnoreCase);
+var studyFlagIndex = Array.FindIndex(args, a =>
+    string.Equals(a, "--study-seconds", StringComparison.OrdinalIgnoreCase));
+var studySeconds = 0;
 int? readOnlySamplingIntervalMs = null;
 var sampleIntervalIndex = Array.FindIndex(args, a =>
     string.Equals(a, "--telemetry-interval-ms", StringComparison.OrdinalIgnoreCase));
@@ -72,6 +75,20 @@ if (compareTelemetry &&
         "do not add --telemetry-interval-ms, --soak-seconds, or hardware write flags.");
 if (hardware && !OperatingSystem.IsWindows())
     throw new PlatformNotSupportedException("AMD ADLX hardware mode currently requires Windows.");
+if (studyFlagIndex >= 0)
+{
+    if (!hardware || writeRequested || !verifyGpu || !sustainedBenchmark ||
+        extendedBenchmark || compareTelemetry || sampleIntervalIndex >= 0 ||
+        args.Contains("--soak-seconds", StringComparer.OrdinalIgnoreCase))
+        throw new InvalidOperationException(
+            "--study-seconds requires read-only --hardware --verify-gpu --sustained-benchmark; " +
+            "cannot combine with telemetry overrides, compare mode, soak mode or write flags.");
+    if (studyFlagIndex + 1 >= args.Length ||
+        !int.TryParse(args[studyFlagIndex + 1], out studySeconds) ||
+        studySeconds is < ReadOnlyStudy.MinimumSeconds or > ReadOnlyStudy.MaximumSeconds)
+        throw new ArgumentOutOfRangeException(nameof(args),
+            $"Use --study-seconds {ReadOnlyStudy.MinimumSeconds} to {ReadOnlyStudy.MaximumSeconds}.");
+}
 
 var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AmdTune");
 Directory.CreateDirectory(dataDir);
@@ -123,6 +140,181 @@ if (soakFlagIndex >= 0)
         !int.TryParse(args[soakFlagIndex + 1], out soakSeconds) ||
         soakSeconds is < 30 or > 180)
         throw new ArgumentOutOfRangeException(nameof(soakSeconds), "Use --soak-seconds 30 through 180.");
+}
+
+// Five-minute (or operator-selected) read-only measurement study.
+// This reuses the bounded 750ms GPU work dispatches and performs full CPU
+// correctness checks between them, not an uninterrupted GPU saturation test.
+if (studySeconds > 0)
+{
+    var device = app.Services.GetRequiredService<IGpuDevice>();
+    var runner = app.Services.GetRequiredService<IWorkloadRunner>();
+    var initialSettings = await device.ReadSettingsAsync(CancellationToken.None);
+    var finalSettings = initialSettings;
+    var session = Guid.NewGuid();
+    var start = DateTimeOffset.UtcNow;
+    var watch = System.Diagnostics.Stopwatch.StartNew();
+    var records = new List<StudyObservation>();
+    StudySummary? summary = null;
+    string? error = null;
+    var passed = false;
+    var blocks = 0;
+    Console.WriteLine($"GPU MEASUREMENT STUDY: {studySeconds} seconds minimum, read-only.");
+    Console.WriteLine($"Intervals: {string.Join(", ", ReadOnlyStudy.IntervalsMs)} ms; balanced rotating blocks.");
+    Console.WriteLine("All GPU writes disabled; each reading has 90C hotspot abort guard.");
+    Console.WriteLine($"Original driver settings: {initialSettings}");
+    try
+    {
+        for (var block = 0; block < ReadOnlyStudy.MaxBlocks; block++)
+        {
+            if (block > 0 && watch.Elapsed.TotalSeconds >= studySeconds)
+                break;
+            var schedule = ReadOnlyStudy.Schedule(block);
+            var blockStart = DateTimeOffset.UtcNow;
+            for (var pos = 0; pos < schedule.Count; pos++)
+            {
+                var (kind, intervalMs) = schedule[pos];
+                using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                var recorder = new WorkloadTelemetryRecorder(
+                    device, TimeSpan.FromMilliseconds(intervalMs));
+                var measureStart = DateTimeOffset.UtcNow;
+                var measurement = await recorder.CaptureAsync(
+                    token => runner.RunAsync(kind, 49191 + block, token),
+                    maxHotspotC: 90,
+                    budget.Token);
+                var measureFinish = DateTimeOffset.UtcNow;
+                records.Add(new StudyObservation(
+                    block, pos, kind, intervalMs, measureStart, measureFinish, measurement));
+
+                // Hard fail: any wrong shader output, missing GPU execution,
+                // failed ADLX telemetry or thermal excursion aborts the study.
+                if (!measurement.ExecutedOnGpu || !measurement.Correct ||
+                    measurement.Mismatches != 0 || !double.IsFinite(measurement.Score) ||
+                    measurement.Score <= 0)
+                    throw new HardwareException(
+                        $"GPU correctness failure in block {block + 1}: {kind} at {intervalMs}ms.");
+            }
+            blocks++;
+            var observedSettings = await device.ReadSettingsAsync(CancellationToken.None);
+            if (observedSettings != initialSettings)
+                throw new SafetyException(
+                    $"Driver tuning changed during read-only study: {initialSettings} -> {observedSettings}.");
+            var recent = records.Skip(records.Count - schedule.Count).ToArray();
+            var hottest = recent.Select(r => r.Measurement.TelemetryEvidence?.PeakHotspotC)
+                .Where(c => c is > 0).Select(c => c!.Value)
+                .DefaultIfEmpty(double.NaN).Max();
+            var unique = recent.Sum(r =>
+                r.Measurement.TelemetryEvidence?.Diagnostics?.DistinctSamplesWithinHostTimedWindow ?? 0);
+            Console.WriteLine(
+                $"Block {block + 1} complete: elapsed={watch.Elapsed.TotalSeconds:F1}s / {studySeconds}s; " +
+                $"workloads={records.Count}, all correct, " +
+                $"host GPU timing={recent.Sum(r => r.Measurement.ElapsedMilliseconds)/1000:F1}s; " +
+                $"in-window unique ADLX samples={unique}; " +
+                $"peak sampled hotspot={(double.IsFinite(hottest) ? hottest.ToString("F1") : "unknown")}C; " +
+                $"block wall-time={(DateTimeOffset.UtcNow - blockStart).TotalSeconds:F1}s");
+        }
+        if (watch.Elapsed.TotalSeconds < studySeconds)
+            throw new SafetyException("Reached maximum measurement blocks before the requested study duration.");
+        summary = ReadOnlyStudy.Summarize(records);
+        passed = true;
+    }
+    catch (Exception ex)
+    {
+        error = ex.ToString();
+        Environment.ExitCode = 1;
+        Console.Error.WriteLine("GPU_STUDY_FAIL: " + ex);
+    }
+    finally
+    {
+        watch.Stop();
+        try
+        {
+            finalSettings = await device.ReadSettingsAsync(CancellationToken.None);
+            if (finalSettings != initialSettings)
+            {
+                passed = false;
+                error = "Read-only study detected changed driver settings: " + finalSettings;
+                Environment.ExitCode = 1;
+                Console.Error.WriteLine("GPU_STUDY_FAIL: " + error);
+            }
+        }
+        catch (Exception ex)
+        {
+            passed = false;
+            error = "Final driver readback failed: " + ex;
+            Environment.ExitCode = 1;
+            Console.Error.WriteLine("GPU_STUDY_FAIL: " + error);
+        }
+        if (passed && summary is not null)
+        {
+            Console.WriteLine(
+                $"Study totals: {summary.TotalBlocks} complete blocks, " +
+                $"{summary.TotalMeasurements} correctly verified workloads, " +
+                $"{summary.TotalHostTimedSeconds:F1}s of host-timed GPU work; " +
+                $"total wall-time={watch.Elapsed.TotalSeconds:F1}s.");
+            foreach (var condition in summary.Conditions)
+            {
+                var stats = condition.Throughput;
+                Console.WriteLine(
+                    $"{condition.Kind} @{condition.PollIntervalMs}ms: " +
+                    $"N={condition.ScoredMeasurements} (plus warmup); " +
+                    $"mean={stats?.Mean.ToString("N0") ?? "n/a"}, " +
+                    $"median={stats?.Median.ToString("N0") ?? "n/a"}, " +
+                    $"CV={stats?.CoefficientOfVariationPercent.ToString("F2") ?? "n/a"}%; " +
+                    $"later-vs-earlier={condition.LaterHalfVsEarlyHalfPercent?.ToString("+0.00;-0.00;0.00") ?? "n/a"}%; " +
+                    $"in-window ADLX={condition.DistinctInWindowSamples}, " +
+                    $"active={condition.ActiveInWindowSamples}, " +
+                    $"peak hotspot={condition.PeakObservedHotspotC?.ToString("F1") ?? "n/a"}C");
+            }
+            foreach (var pair in summary.PairedComparisons)
+                Console.WriteLine(
+                    $"PAIRED {pair.Kind} {pair.ComparisonIntervalMs}/{pair.ReferenceIntervalMs}ms " +
+                    $"N={pair.PairedBlocks}: mean difference=" +
+                    $"{pair.PairedPercentDifferences?.Mean.ToString("+0.00;-0.00;0.00") ?? "n/a"}%, " +
+                    $"CV not interpreted as statistical confidence.");
+        }
+
+        var folder = Path.Combine(dataDir, "soaks");
+        Directory.CreateDirectory(folder);
+        var destination = Path.Combine(folder, session.ToString("N") + ".study.json");
+        var report = new
+        {
+            SchemaVersion = 1,
+            SessionId = session,
+            Kind = "read-only-five-minute-telemetry-study",
+            Simulated = false,
+            StartedAt = start,
+            FinishedAt = DateTimeOffset.UtcNow,
+            RequestedDurationSeconds = studySeconds,
+            ActualWallSeconds = watch.Elapsed.TotalSeconds,
+            CompletedBlocks = blocks,
+            Observations = records,
+            Summary = summary,
+            OriginalSettings = initialSettings,
+            FinalSettings = finalSettings,
+            Completed = passed,
+            Error = error,
+            Limitations =
+                "Time-balanced 125/250/500ms monitoring comparisons with first block discarded " +
+                "for scoring; GPU synthetic host time only. Full CPU verification gaps prevent " +
+                "continuous 5-minute GPU load. No voltage, VRAM or memory timing writes. " +
+                "Not a certified stability/efficiency test; GPU timestamp queries not implemented."
+        };
+        var temp = destination + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp,
+                System.Text.Json.JsonSerializer.Serialize(report,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temp, destination, true);
+            Console.WriteLine("Audit: " + destination);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+        Console.WriteLine($"Final driver settings: {finalSettings}");
+        Console.WriteLine(passed ? "GPU_STUDY_PASS" : "GPU_STUDY_FAIL");
+        if (!passed) Environment.ExitCode = 1;
+    }
+    return;
 }
 
 // Read-only ABBA/BAAB monitoring interference comparison. This mode does

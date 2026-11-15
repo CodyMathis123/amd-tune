@@ -269,6 +269,29 @@ The source review found a concrete evidence-contamination path: the sampler is s
 
 This iteration adds `HostTimedWindow` start/end timestamps captured directly around the sustained runner's timed dispatch plus GPU buffer readback (not native GPU queue timestamps). The telemetry collector continues to observe and enforce hotspot safety across **all** readings, retaining every snapshot in the raw audit, but uses only readings falling inside the host-timed interval for exploratory active-load power/clock summaries. It records total observations and in-window observations separately. Tests cover time-window filtering and invalid bounds. This change does not enable automated tuning, prove efficiency, or eliminate ADLX internal averaging/latency. Proper D3D12 GPU timestamp query implementation remains the next timing milestone.
 
+## Next milestone: full five-minute read-only study
+
+The short 24-measurement stock crossover passed all correctness checks,
+but Compute had a -5.23% 500ms-vs-125ms host throughput difference
+while Memory/Mixed each differed by less than 0.4%. The sample count is
+insufficient for performance causality or thermal conclusions.
+
+The next **five-minute read-only experiment** performs rotating
+nine-workload-condition blocks with 125/250/500ms telemetry cadences,
+preserving raw ADLX traces and per-block GPU scores. It excludes the
+first block as an unscored warmup, records full session/host-GPU time
+and early/late drift, and aborts on any sensor/thermal/correctness failure
+or changed tuning readback. It does not write settings.
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark --study-seconds 300
+
+Expected `GPU_STUDY_PASS`; report under
+`%LOCALAPPDATA%/AmdTune/soaks/*.study.json`. **No guarantee of a
+continuous 300-second GPU load** because CPU verification occurs between
+shader windows. Do not promote to write-enabled automation based only on
+a passing soak. Continue to require a real crash-recovery fault test
+before automatic tuning.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

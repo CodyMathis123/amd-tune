@@ -230,6 +230,28 @@ Operator-supplied audit ID `af209055-a5b3-469d-91fa-f179bd739238`, actual RX 907
 
 **Next instrumentation targets:** retain clean no-write correctness soak as a regression gate; sample sensor metrics persistently with less process startup overhead and trustworthy timestamps; incorporate GPU command-queue timestamp queries; warm up and separately compare cold/warm sessions; extend heavy-load testing to hot steady-state with active thermal guards; and require at least two independent stock reference sessions before any performance-based recommendation. Automatic changes and persistent profiles remain disabled.
 
+## Stock read-only monitoring diagnostic and next paired experiment
+
+The operator saved/disabled the custom Adrenalin profile. Two read-only
+runs at **0 mV / 2518 MHz / Default timings** each passed all three GPU
+workloads with zero mismatches, and initial/final driver settings matched.
+At a 125ms request, distinct ADLX samples per workload were 6/7/5 with
+4/6/5 active readings. At 500ms, 2/2/2 distinct and active readings.
+The synthetic Mixed score difference (+18.49% for 500ms vs 125ms) has
+only one observation per condition and cannot establish monitoring overhead.
+More detailed analysis is in [Measurement Methodology](MEASUREMENT-RESEARCH.md).
+
+New read-only comparison command after successful CI validation:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark --compare-telemetry
+
+The command runs two ABBA/BAAB crossover rounds **per workload** and
+checks all results against the CPU oracle, with sampled thermal guards and
+final driver readback. No writes or automatic tuning. Report stored under
+`%LOCALAPPDATA%/AmdTune/soaks` with suffix `.comparison.json`.
+Only run this diagnostic when the system is otherwise idle and save work
+first, because real GPU workloads are executed.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

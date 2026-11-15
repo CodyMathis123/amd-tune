@@ -81,6 +81,23 @@ If you already have third_party/ADLX, skip the clone and keep the pinned revisio
 
 The UI shows actual ADLX capabilities, raw driver limits and device name; candidates cannot be submitted.
 
+### Paired stock telemetry comparison — ABBA/BAAB read-only
+
+To avoid reading too much into a single 125ms versus 500ms comparison,
+AMD Tune has a gated read-only monitoring-crossover diagnostic:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark --compare-telemetry
+
+The command uses a single fixed driver-tuning profile, runs two
+125/500/500/125 and 500/125/125/500 rounds for **each** GPU workload,
+checks all results against the CPU reference, and records both
+per-workload descriptive score distributions and raw telemetry evidence.
+No hardware tuning writes or stability verdicts are permitted.
+Results are stored under `%LOCALAPPDATA%/AmdTune/soaks` as
+`*.comparison.json`; sample size is only four per condition, so
+do not interpret the reported difference as a causal effect or a
+statistically reliable performance gain. It does not use GPU queue timestamps.
+
 ### Diagnosing ADLX stream publication cadence and monitoring overhead
 
 If the sustained read-only test reports `ActiveSamples=0` despite

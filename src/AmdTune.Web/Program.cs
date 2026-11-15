@@ -37,6 +37,7 @@ builder.WebHost.UseUrls("http://127.0.0.1:5783");
 var hardware = args.Contains("--hardware", StringComparer.OrdinalIgnoreCase);
 var writeRequested = args.Contains("--enable-hardware-writes", StringComparer.OrdinalIgnoreCase);
 var verifyGpu = args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase);
+var compareTelemetry = args.Contains("--compare-telemetry", StringComparer.OrdinalIgnoreCase);
 int? readOnlySamplingIntervalMs = null;
 var sampleIntervalIndex = Array.FindIndex(args, a =>
     string.Equals(a, "--telemetry-interval-ms", StringComparison.OrdinalIgnoreCase));
@@ -62,6 +63,13 @@ if (extendedBenchmark && !hardware)
     throw new InvalidOperationException("--extended-benchmark requires --hardware.");
 
 if (writeRequested && !hardware) throw new InvalidOperationException("Write flag only valid with --hardware.");
+if (compareTelemetry &&
+    (!hardware || writeRequested || !verifyGpu || !sustainedBenchmark ||
+     extendedBenchmark || sampleIntervalIndex >= 0 ||
+     args.Contains("--soak-seconds", StringComparer.OrdinalIgnoreCase)))
+    throw new InvalidOperationException(
+        "--compare-telemetry requires read-only --hardware --verify-gpu --sustained-benchmark; " +
+        "do not add --telemetry-interval-ms, --soak-seconds, or hardware write flags.");
 if (hardware && !OperatingSystem.IsWindows())
     throw new PlatformNotSupportedException("AMD ADLX hardware mode currently requires Windows.");
 
@@ -115,6 +123,135 @@ if (soakFlagIndex >= 0)
         !int.TryParse(args[soakFlagIndex + 1], out soakSeconds) ||
         soakSeconds is < 30 or > 180)
         throw new ArgumentOutOfRangeException(nameof(soakSeconds), "Use --soak-seconds 30 through 180.");
+}
+
+// Read-only ABBA/BAAB monitoring interference comparison. This mode does
+// NOT write GPU settings. It compares *measurement conditions*, not tuned
+// against stock, and is not a significance test.
+if (compareTelemetry)
+{
+    var gpu = app.Services.GetRequiredService<IGpuDevice>();
+    var runner = app.Services.GetRequiredService<IWorkloadRunner>();
+    var original = await gpu.ReadSettingsAsync(CancellationToken.None);
+    var finalSettings = original;
+    var id = Guid.NewGuid();
+    var started = DateTimeOffset.UtcNow;
+    var observations = new List<MonitoringObservation>();
+    IReadOnlyList<MonitoringKindSummary>? summaries = null;
+    string? error = null;
+    var passed = false;
+
+    Console.WriteLine("GPU MONITOR COMPARISON: READ-ONLY ABBA/BAAB; no hardware tuning writes.");
+    Console.WriteLine($"Original driver settings: {original}");
+    try
+    {
+        foreach (var kind in Enum.GetValues<WorkloadKind>())
+        {
+            for (var round = 0; round < MonitoringComparison.Rounds; round++)
+            {
+                var sequence = MonitoringComparison.IntervalsForRound(round);
+                for (var position = 0; position < sequence.Count; position++)
+                {
+                    var interval = sequence[position];
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                    var recorder = new WorkloadTelemetryRecorder(
+                        gpu, TimeSpan.FromMilliseconds(interval));
+                    // Pair the seed within each crossover round; never alter
+                    // tuning state to select a telemetry interval.
+                    var result = await recorder.CaptureAsync(
+                        token => runner.RunAsync(kind, 49191 + round, token),
+                        maxHotspotC: 90, timeout.Token);
+                    observations.Add(new MonitoringObservation(
+                        kind, round, position, interval, result));
+                    var diag = result.TelemetryEvidence?.Diagnostics;
+                    Console.WriteLine(
+                        $"{kind} round={round + 1}, slot={position + 1}, sampling={interval}ms: " +
+                        $"correct={result.Correct}, errors={result.Mismatches}, " +
+                        $"score={result.Score:N0}, window={result.ElapsedMilliseconds:F1}ms, " +
+                        $"distinct ADLX={diag?.DistinctMetricSamples ?? 0}, " +
+                        $"utilization mean={diag?.MeanUtilizationPercent?.ToString("F1") ?? "missing"}%");
+                    if (!result.ExecutedOnGpu || !result.Correct || result.Mismatches != 0)
+                        throw new HardwareException(
+                            "GPU correctness failure during read-only monitoring comparison.");
+                }
+            }
+        }
+        summaries = MonitoringComparison.Summarize(observations);
+        passed = true;
+    }
+    catch (Exception ex)
+    {
+        error = ex.ToString();
+        Console.Error.WriteLine("GPU_MONITOR_COMPARE_FAIL: " + ex);
+        Environment.ExitCode = 1;
+    }
+    finally
+    {
+        try
+        {
+            finalSettings = await gpu.ReadSettingsAsync(CancellationToken.None);
+            if (finalSettings != original)
+            {
+                error = "Read-only monitoring comparison detected changed GPU driver settings.";
+                passed = false;
+                Environment.ExitCode = 1;
+                Console.Error.WriteLine("GPU_MONITOR_COMPARE_FAIL: " + error);
+            }
+        }
+        catch (Exception ex)
+        {
+            error = "Final driver settings readback failed: " + ex;
+            passed = false;
+            Environment.ExitCode = 1;
+            Console.Error.WriteLine("GPU_MONITOR_COMPARE_FAIL: " + error);
+        }
+
+        if (passed && summaries is not null)
+            foreach (var summary in summaries)
+                Console.WriteLine(
+                    $"{summary.Kind}: 125ms mean={summary.Fast.Mean:N0} CV={summary.Fast.CoefficientOfVariationPercent:F2}%, " +
+                    $"500ms mean={summary.Slow.Mean:N0} CV={summary.Slow.CoefficientOfVariationPercent:F2}%; " +
+                    $"500-vs-125={summary.SlowVsFastPercent:+0.00;-0.00;0.00}%; " +
+                    $"distinct ADLX samples={summary.FastDistinctSourceSamples}/{summary.SlowDistinctSourceSamples}.");
+
+        var reportDirectory = Path.Combine(dataDir, "soaks");
+        Directory.CreateDirectory(reportDirectory);
+        var destination = Path.Combine(reportDirectory, id.ToString("N") + ".comparison.json");
+        var report = new
+        {
+            SchemaVersion = 1,
+            SessionId = id,
+            Simulated = false,
+            Kind = "read-only-telemetry-crossover",
+            StartedAt = started,
+            FinishedAt = DateTimeOffset.UtcNow,
+            OriginalSettings = original,
+            FinalSettings = finalSettings,
+            Completed = passed,
+            Error = error,
+            Schedule = "ABBA/BAAB per workload; 125ms vs 500ms, two crossover rounds",
+            Observations = observations,
+            Summaries = summaries,
+            Limitations =
+                "Host-dispatch timings only, not GPU timestamps. Four observations per condition; " +
+                "no confidence interval or causal claim. Temperature/power are asynchronous ADLX snapshots. " +
+                "Does not approve automatic tuning or establish long-term stability."
+        };
+        var temp = destination + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp,
+                System.Text.Json.JsonSerializer.Serialize(report,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temp, destination, true);
+            Console.WriteLine("Audit: " + destination);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+        Console.WriteLine($"Final driver settings: {finalSettings}");
+        Console.WriteLine(passed ? "GPU_MONITOR_COMPARE_PASS" : "GPU_MONITOR_COMPARE_FAIL");
+        if (!passed) Environment.ExitCode = 1;
+    }
+    return;
 }
 
 // Command-line read-only workload verification / bounded repeatability soak.

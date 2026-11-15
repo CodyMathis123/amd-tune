@@ -94,3 +94,47 @@ AMD's official `IADLXGPUMetrics::TimeStamp` returns metric *acquisition* time in
 A read-only-only `--telemetry-interval-ms` parameter accepts 100–1000 ms when and only when `--hardware --verify-gpu` is active, never for a tuning-write session. This provides a controlled way to compare monitoring interference at 125 ms versus 500 ms without disabling thermal safety or applying settings. The interval and raw readings are included in the soak audit.
 
 **Important experiment design:** keep the currently configured Adrenalin profile *identical across both interval-comparison runs*. Separately, save that custom profile, reset to Adrenalin Default and verify settings before collecting factory-stock performance baselines. The interval comparison is a diagnostic, not a default-vs-tuned performance proof. Avoid performance-based auto-tuning decisions until the collector has independently verified cadence and queue-calibrated GPU timing.
+
+## November 15 — stock 125ms versus 500ms read-only telemetry diagnostic
+
+The operator restored AMD Adrenalin factory-default tuning and verified driver
+readback `0 mV / 2518 MHz configured VRAM limit / Default timings` before and
+after both **read-only** GPU validation commands. All six actual RX 9070 XT
+workloads passed with 0 mismatches and no settings changes.
+
+| Workload | 125ms host-timed synthetic elements/s | 500ms host-timed synthetic elements/s | 500ms minus 125ms |
+|---|---:|---:|---:|
+| Compute | 9.169 billion/s | 9.263 billion/s | +1.02% |
+| Memory | 9.617 billion/s | 9.335 billion/s | -2.93% |
+| Mixed | 9.126 billion/s | 10.813 billion/s | +18.49% |
+
+At 125ms requested sampling, the native source metric intervals averaged
+140/134/140ms, with **18/18 distinct** samples in total and **15** qualifying
+as active. At 500ms requested sampling, 6/6 distinct readings and six active
+samples were observed; native metric intervals averaged 502/513/504ms.
+The previous `ActiveSamples=0` observation did not recur and was not a GPU
+correctness problem. This confirms sensor throughput and source timestamp
+deduplication, but does **not** demonstrate 500ms benchmarking faster:
+each configuration has **only one measurement per workload**, nonrandomized
+in temporal order. The 18.49% Mixed difference is a strong reason to avoid
+attributing the difference to polling overhead.
+
+The native `metricTimestampMs` value near **213 million** does not match
+a contemporary Unix-epoch millisecond time. Official ADLX documentation calls
+the field an epoch time, but this observed numeric value is incompatible with
+the corresponding UTC timestamp in the audit. Treat this ADLX-provided value
+as a **source sample identity and relative interval** until its absolute
+clock domain is verified. Do not align it to system UTC or GPU command timestamps
+based on the documentation alone.
+
+New opt-in **read-only crossover** command:
+`--hardware --verify-gpu --sustained-benchmark --compare-telemetry`
+runs two ABBA/BAAB rounds at 125 and 500ms within one process, per workload
+(four measurements per interval and kind), with the **same seed within each
+round**, active thermal monitoring and driver readback verification. It stores
+all raw sensor measurements and descriptive score statistics in
+`%LOCALAPPDATA%/AmdTune/soaks/*.comparison.json`.
+It **cannot** apply any voltage/memory clock changes and does not claim a
+statistically significant performance difference. It is a first controlled
+repeatability diagnostic, not GPU queue timestamp measurement or efficiency
+validation. Automatic tuning is still disabled.

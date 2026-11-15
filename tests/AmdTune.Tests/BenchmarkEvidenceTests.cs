@@ -339,4 +339,62 @@ public class BenchmarkEvidenceTests
         }
     }
 
+    [Fact]
+    public void Monitoring_comparison_interleaves_fast_and_slow_sampling_with_time_balancing()
+    {
+        Assert.Equal(new[] { 125, 500, 500, 125 }, MonitoringComparison.IntervalsForRound(0));
+        Assert.Equal(new[] { 500, 125, 125, 500 }, MonitoringComparison.IntervalsForRound(1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MonitoringComparison.IntervalsForRound(2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MonitoringComparison.IntervalsForRound(-1));
+    }
+
+    [Fact]
+    public void Monitoring_comparison_rejects_missing_or_incorrect_GPU_data()
+    {
+        var complete = MonitoringTestObservations();
+        Assert.Equal(3, MonitoringComparison.Summarize(complete).Count);
+        Assert.Throws<ArgumentException>(() => MonitoringComparison.Summarize(complete.Skip(1).ToArray()));
+        var corrupt = complete.ToArray();
+        corrupt[0] = corrupt[0] with
+        {
+            Measurement = corrupt[0].Measurement with { Correct = false, Mismatches = 1 }
+        };
+        Assert.Throws<ArgumentException>(() => MonitoringComparison.Summarize(corrupt));
+    }
+
+    [Fact]
+    public void Monitoring_comparison_reports_observed_score_difference_not_a_tuning_verdict()
+    {
+        var observations = MonitoringTestObservations();
+        var result = MonitoringComparison.Summarize(observations);
+        Assert.All(result, summary =>
+        {
+            Assert.Equal(4, summary.Fast.N);
+            Assert.Equal(4, summary.Slow.N);
+            Assert.Equal(10, summary.SlowVsFastPercent, 7);
+            Assert.Equal(0, summary.FastDistinctSourceSamples);
+            Assert.Equal(0, summary.SlowDistinctSourceSamples);
+        });
+    }
+
+    private static MonitoringObservation[] MonitoringTestObservations()
+    {
+        var items = new List<MonitoringObservation>();
+        foreach (var kind in Enum.GetValues<WorkloadKind>())
+            for (var round = 0; round < MonitoringComparison.Rounds; round++)
+            {
+                var sequence = MonitoringComparison.IntervalsForRound(round);
+                for (var i = 0; i < sequence.Count; i++)
+                {
+                    var ms = sequence[i];
+                    items.Add(new MonitoringObservation(
+                        kind, round, i, ms,
+                        new WorkloadMeasurement(kind, true, true, 1024, 0,
+                            ms == MonitoringComparison.FastIntervalMs ? 100 : 110,
+                            "test", 750, "monitor crossover")));
+                }
+            }
+        return items.ToArray();
+    }
+
 }

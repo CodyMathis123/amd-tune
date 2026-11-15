@@ -77,3 +77,59 @@ jobs:
           name: amd-adlx-bridge-unsigned-dev
           path: artifacts/native/AmdTune.AdlxBridge.exe
           retention-days: 7
+
+  package-dev:
+    name: Assemble unsigned Windows development bundle
+    runs-on: windows-latest
+    needs: [tests, publish-smoke, native-build]
+    timeout-minutes: 10
+    steps:
+      - name: Download managed application and recovery outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: unsigned-windows-dev-build
+          path: downloaded/managed
+      - name: Download native ADLX bridge built from pinned official SDK
+        uses: actions/download-artifact@v4
+        with:
+          name: amd-adlx-bridge-unsigned-dev
+          path: downloaded/native
+      - name: Assemble complete package and inventory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = "downloaded/managed/web"
+          $recovery = "downloaded/managed/recovery/AmdTune.Recovery.exe"
+          $bridge = "downloaded/native/AmdTune.AdlxBridge.exe"
+          foreach ($path in @($app, $recovery, $bridge)) {
+            if (!(Test-Path $path)) { throw "Expected CI output missing: $path" }
+          }
+          New-Item -ItemType Directory -Force -Path "artifacts/bundle" | Out-Null
+          Copy-Item -Path (Join-Path $app '*') -Destination "artifacts/bundle" -Force -Recurse
+          Copy-Item -Path $recovery -Destination "artifacts/bundle/AmdTune.Recovery.exe" -Force
+          Copy-Item -Path $bridge -Destination "artifacts/bundle/AmdTune.AdlxBridge.exe" -Force
+          foreach ($file in @("AmdTune.Web.exe", "AmdTune.Web.dll", "AmdTune.Recovery.exe", "AmdTune.AdlxBridge.exe")) {
+            if (!(Test-Path (Join-Path "artifacts/bundle" $file))) { throw "Incomplete bundle, missing $file" }
+          }
+          @(
+            "AMD Tune UNSIGNED DEVELOPMENT BUILD"
+            "Source workflow commit: $env:GITHUB_SHA"
+            "Native AMD ADLX SDK revision: 32b5a740d42295c5dfe9026b9f52683da0f3af91"
+            "This artifact is NOT code-signed, hardware-validated or an official release."
+            "It is intended for read-only ADLX discovery and simulated testing first."
+            "Copy all extracted files together; do not separate the bridge and recovery executables."
+            "Default launch: AmdTune.Web.exe (simulation only)."
+            "Read-only launch: AmdTune.Web.exe --hardware (requires supported AMD driver)."
+            "DO NOT enable hardware writes before the documented validation gates."
+          ) | Set-Content -Encoding utf8 "artifacts/bundle/DEVELOPMENT-BUILD.txt"
+          $hashLines = Get-ChildItem "artifacts/bundle" -File -Filter '*.exe' |
+            Sort-Object Name |
+            ForEach-Object { $h = Get-FileHash $_.FullName -Algorithm SHA256; "$($h.Hash)  $($_.Name)" }
+          $hashLines | Set-Content -Encoding utf8 "artifacts/bundle/SHA256SUMS.txt"
+      - name: Publish complete unsigned development package
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-tune-windows-x64-unsigned-dev
+          path: artifacts/bundle/
+          retention-days: 7
+          if-no-files-found: error

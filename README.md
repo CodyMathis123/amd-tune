@@ -41,6 +41,21 @@ From the repo root:
 
 Open http://127.0.0.1:5783. The title and results clearly state SIMULATION. Use **Preview conservative voltage sweep** for a three-candidate guided plan, or enter one candidate manually. This does not activate hardware in simulation mode.
 
+### 2. No Visual Studio required: download complete Windows development build
+
+A standalone **unsigned development bundle** is generated on every passing PR build. The package includes the published .NET app, separate recovery process, and C++ ADLX bridge compiled by GitHub Actions against the pinned official AMD SDK. You can keep using VS Code without installing Visual Studio or its Build Tools.
+
+1. Open the successful GitHub Actions workflow for this PR, then download the artifact named **amd-tune-windows-x64-unsigned-dev**. Confirm the workflow comes from your repository.
+2. Extract the ZIP to a folder of your choice. Keep all files together, including the bridge and recovery executable. DEVELOPMENT-BUILD.txt records the build commit and SHA256SUMS.txt records executable hashes.
+3. Run AmdTune.Web.exe without arguments for **simulation mode**.
+4. For **read-only hardware discovery**, run AmdTune.Web.exe --hardware from the extracted folder. Alternatively, extract into the repository's artifacts/app folder and run scripts/hardware-doctor.ps1 from the repository root.
+
+Do not enable hardware writes until the full hardware validation checklist is satisfied. This SDK bridge has compiled in CI but has not been runtime-tested on your RX 9070 XT.
+
+#### Alternative: compile the native adapter yourself
+
+You do **not** need the full Visual Studio IDE. Install standalone Microsoft Visual Studio Build Tools, select **Desktop development with C++** with MSVC x64 and Windows SDK, and rerun build-native.ps1. VS Code alone does not install cl.exe or the Windows C++ toolchain.
+
 ### 2. Build official native ADLX bridge
 
 Clone or download the AMD SDK under your own SDK license. You can run from **ordinary PowerShell** or Visual Studio Developer PowerShell. The native build script uses Microsoft's vswhere and Developer PowerShell launcher to initialize MSVC x64 if installed:

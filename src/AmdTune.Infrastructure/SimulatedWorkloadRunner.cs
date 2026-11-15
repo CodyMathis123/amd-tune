@@ -14,9 +14,7 @@ public sealed class SimulatedWorkloadRunner(SimulatedGpuDevice device) : IWorklo
         cancellationToken.ThrowIfCancellationRequested();
         var s = device.Current;
         var factor = 1 + (-s.VoltageOffsetMv * 0.0008) + (s.MemoryClockMhz - 2500) * 0.0001;
-        var random = new Random(HashCode.Combine(kind, seed, 101));
-        // HashCode.Combine is process-seeded; reproducibility requires a fixed arithmetic seed instead.
-        random = new Random(unchecked(seed * 397 + (int)kind * 7919));
+        var random = new Random(unchecked(seed * 397 + (int)kind * 7919));
         var jitter = (random.NextDouble() - 0.5) * 0.01;
         var corrupt = InjectCorruption && (FailOnlyKind is null || FailOnlyKind == kind);
         var score = (kind == WorkloadKind.Memory ? 500 : kind == WorkloadKind.Mixed ? 150 : 100)

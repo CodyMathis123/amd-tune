@@ -67,7 +67,10 @@ public sealed class ExternalRecoveryGuard(string directory, string recoveryExecu
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
             await _guard.WaitForExitAsync(timeout.Token);
+            _guard.Dispose();
+            _guard = null;
         }
+        _lease = null;
     }
 
     public ValueTask DisposeAsync()

@@ -12,13 +12,13 @@ public sealed class ExperimentManager(IGpuDevice device, TuningEngine engine, bo
     private ExperimentSnapshot _snapshot = new(false, null, null, null);
     public ExperimentSnapshot Snapshot { get { lock (_gate) return _snapshot; } }
 
-    public async Task<bool> StartAsync(IReadOnlyList<TuningSettings> candidates, int repetitions)
+    public Task<bool> StartAsync(IReadOnlyList<TuningSettings> candidates, int repetitions)
     {
         if (!canWrite) throw new SafetyException("Hardware writes are disabled. Start with --enable-hardware-writes only after completing the safety checklist.");
         if (candidates is null || candidates.Count == 0) throw new SafetyException("At least one candidate required.");
         lock (_gate)
         {
-            if (_snapshot.Running) return false;
+            if (_snapshot.Running) return Task.FromResult(false);
             _cancel = new CancellationTokenSource();
             _snapshot = new ExperimentSnapshot(true, null, null, null);
         }
@@ -50,7 +50,7 @@ public sealed class ExperimentManager(IGpuDevice device, TuningEngine engine, bo
                 }
             }
         });
-        return true;
+        return Task.FromResult(true);
     }
 
     public bool Cancel()

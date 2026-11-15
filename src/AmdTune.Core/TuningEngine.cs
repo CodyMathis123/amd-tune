@@ -50,7 +50,6 @@ public sealed class TuningEngine(
             await guard.ArmAsync(original, cancellationToken);
             guardArmed = true;
 
-            var first = true;
             foreach (var candidate in plan.Candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -91,7 +90,6 @@ public sealed class TuningEngine(
                 Emit(RunPhase.RollingBack, "Restoring original driver settings");
                 // No candidate is left applied across trials.
                 await RestoreAndVerify(original);
-                first = false;
             }
 
             phase = RunPhase.Completed;
@@ -111,7 +109,7 @@ public sealed class TuningEngine(
         }
         finally
         {
-            if (original is not null)
+            if (original is not null && guardArmed)
             {
                 try
                 {

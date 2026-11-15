@@ -55,7 +55,7 @@ app.Use(async (ctx, next) =>
     }
     if (HttpMethods.IsPost(ctx.Request.Method))
     {
-        if (!string.Equals(ctx.Request.Headers.Origin.ToString(), origin, StringComparison.Ordinal) ||
+        if (!string.Equals(ctx.Request.Headers["Origin"].ToString(), origin, StringComparison.Ordinal) ||
             !string.Equals(ctx.Request.Headers["X-AmdTune-CSRF"].ToString(), csrfToken, StringComparison.Ordinal))
         {
             ctx.Response.StatusCode = 403;
@@ -95,7 +95,7 @@ app.MapPost("/api/experiment", async (StartExperimentRequest request, Experiment
 });
 app.MapPost("/api/cancel", (ExperimentManager manager) =>
     manager.Cancel() ? Results.Accepted("/api/experiment") : Results.Conflict(new { error = "No active experiment." }));
-app.MapGet("/api/report/{id:guid}", async (Guid id) =>
+app.MapGet("/api/report/{id:guid}", (Guid id) =>
 {
     var path = Path.Combine(dataDir, "reports", id.ToString("N") + ".json");
     return File.Exists(path)

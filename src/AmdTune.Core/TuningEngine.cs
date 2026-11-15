@@ -30,6 +30,7 @@ public sealed class TuningEngine(
         var rollbackVerified = false;
         string? error = null;
         var guardArmed = false;
+        var candidateWriteAttempted = false;
 
         void Emit(RunPhase state, string message) =>
             progress?.Invoke(new RunProgress(state, message, trialResults.Count,
@@ -68,6 +69,7 @@ public sealed class TuningEngine(
                 Emit(RunPhase.Applying, $"B: applying candidate {trialResults.Count + 1}/{plan.Candidates.Count}");
                 await audit.AppendEventAsync(sessionId, new AuditEvent(DateTimeOffset.UtcNow,
                     "candidate", "Attempting candidate write. Recovery guard must be alive.", candidate), cancellationToken);
+                candidateWriteAttempted = true; // Set BEFORE call: partial driver writes must be rolled back.
                 await device.ApplyAsync(candidate, cancellationToken);
                 Emit(RunPhase.Verifying, "Verifying requested values against driver readback");
                 TunePolicy.RequireReadback(candidate, await device.ReadSettingsAsync(cancellationToken));
@@ -131,7 +133,10 @@ public sealed class TuningEngine(
                 {
                     Emit(RunPhase.RollingBack, "Final rollback verification");
                     using var restoreTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                    await device.ApplyAsync(original, restoreTimeout.Token);
+                    // No GPU settings are written during a failed baseline-only
+                    // run. A partial candidate apply still requires restoration.
+                    if (candidateWriteAttempted)
+                        await device.ApplyAsync(original, restoreTimeout.Token);
                     TunePolicy.RequireReadback(original,
                         await device.ReadSettingsAsync(restoreTimeout.Token));
                     rollbackVerified = true;
@@ -149,7 +154,11 @@ public sealed class TuningEngine(
                 try
                 {
                     await audit.AppendEventAsync(sessionId, new AuditEvent(DateTimeOffset.UtcNow,
-                        "final-rollback", "Original settings independently verified after session.", original!), CancellationToken.None);
+                        "final-rollback",
+                        candidateWriteAttempted
+                            ? "Original settings restored and verified following a driver write attempt."
+                            : "Baseline verified unchanged; no candidate driver write attempted.",
+                        original!), CancellationToken.None);
                 }
                 catch (Exception journalError)
                 {

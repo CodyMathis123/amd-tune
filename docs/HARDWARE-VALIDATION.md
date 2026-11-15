@@ -98,6 +98,24 @@ workloads and thus may trigger driver instability on faulty hardware.
 If this does not pass, do not start a tuning experiment. Share the console output
 and audit log. Only attempt Gate 1 after this read-only check passes.
 
+## Gate 0D — Physical DirectX workload verification: PASS (November 15, 2026)
+
+The operator ran `AmdTune.Web.exe --hardware --verify-gpu` on a physical AMD Radeon RX 9070 XT, with these directly observed results:
+
+| Workload | Elements checked | Dispatches | Mismatches | Elapsed, end-to-end |
+| --- | ---: | ---: | ---: | ---: |
+| Compute (64 rounds) | 1,048,576 | 1 | 0 | 26.4 ms |
+| Memory (1 round) | 33,554,432 | 32 | 0 | 68.2 ms |
+| Mixed (16 rounds) | 4,194,304 | 4 | 0 | 9.7 ms |
+
+All three reported `ExecutedOnGpu=true`, `Correct=true`, and the diagnostic printed `GPU_VERIFY_PASS`. The selected DX12 adapter matched `AMD Radeon RX 9070 XT`. Initial and final driver settings were identical: 0 mV voltage offset, 2518 MHz VRAM limit, default memory timing. GPU execution and oracle checks are **verified on hardware**, but the timing samples are one-off observations and do not imply a stable overclock or a calibrated memory-bandwidth metric.
+
+### Additional prewrite safety
+
+Review identified that an experiment failing during the stock baseline path would still call `ApplyAsync(original)` in `finally`, unnecessarily writing driver settings despite having applied no candidate. The engine now records whether any candidate write was **attempted**; baseline-only failures perform readback-only verification, and candidate attempts always retain the full rollback path. CI tests this with an injected high-hotspot baseline failure and a counting hardware mock.
+
+**Next physical gate:** exactly one manually entered -15 mV candidate; VRAM increase 0 MHz; original timing; 3 repetitions. Inspect the JSON report and matching `.events.jsonl`. No guided sweep or persistent profile yet.
+
 ## Gate 1 — conservative first write (will modify hardware)
 
 Only proceed after verifying Gate 0. Stop other tuning tools (Adrenalin's manual profile editor, MSI Afterburner, etc.). Save important work. Real GPU instability may reset the display driver or system.

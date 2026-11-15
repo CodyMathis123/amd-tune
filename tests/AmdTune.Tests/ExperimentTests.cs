@@ -192,4 +192,37 @@ public class ExperimentTests
         Assert.IsType<IOException>(result.InnerException);
     }
 
+    [Fact]
+    public async Task Failure_before_candidate_write_does_not_issue_unnecessary_driver_write()
+    {
+        var gpu = new CountingGpu { HotspotC = 98 };
+        var baseline = await gpu.ReadSettingsAsync(default);
+        var store = new Store();
+        var simulated = new SimulatedGpuDevice();
+        var engine = new TuningEngine(gpu, new SimulatedWorkloadRunner(simulated), store,
+            new SimulationRollbackGuard(), new TunePolicy(new SafetyEnvelope()));
+
+        var result = await engine.RunAsync(new TunePlan([baseline with { VoltageOffsetMv = -15 }]));
+        Assert.Equal(RunPhase.Failed, result.Phase);
+        Assert.True(result.RollbackVerified);
+        Assert.Equal(0, gpu.ApplyCalls);
+    }
+
+    private sealed class CountingGpu : IGpuDevice
+    {
+        private readonly SimulatedGpuDevice _inner = new();
+        public double HotspotC { get; init; } = 48;
+        public int ApplyCalls { get; private set; }
+        public Task<DeviceCapabilities> DiscoverAsync(CancellationToken ct) => _inner.DiscoverAsync(ct);
+        public Task<TuningSettings> ReadSettingsAsync(CancellationToken ct) => _inner.ReadSettingsAsync(ct);
+        public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
+            => Task.FromResult(new GpuTelemetry(DateTimeOffset.UtcNow, HotspotC, 200, 2800, 2500));
+        public Task ApplyAsync(TuningSettings settings, CancellationToken ct)
+        {
+            ApplyCalls++;
+            return _inner.ApplyAsync(settings, ct);
+        }
+    }
+
+
 }

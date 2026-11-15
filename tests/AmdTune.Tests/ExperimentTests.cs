@@ -92,4 +92,41 @@ public class ExperimentTests
         }
         finally { if (Directory.Exists(path)) Directory.Delete(path, true); }
     }
+
+    [Fact]
+    public async Task Corrupt_gpu_result_aborts_and_restores_original_settings()
+    {
+        var gpu = new SimulatedGpuDevice();
+        var store = new Store();
+        var runner = new SimulatedWorkloadRunner(gpu) { InjectCorruption = true };
+        var engine = new TuningEngine(gpu, runner, store,
+            new SimulationRollbackGuard(), new TunePolicy(new SafetyEnvelope()));
+        var original = gpu.Current;
+
+        var report = await engine.RunAsync(new TunePlan([original with { VoltageOffsetMv = -15 }]));
+        Assert.Equal(RunPhase.Failed, report.Phase);
+        Assert.True(report.RollbackVerified);
+        Assert.Contains("correctness", report.Error ?? "", StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(original, gpu.Current);
+    }
+
+    [Fact]
+    public async Task Journal_contains_original_candidate_and_rollback_events()
+    {
+        var gpu = new SimulatedGpuDevice();
+        var path = Path.Combine(Path.GetTempPath(), "AmdTuneJournal_" + Guid.NewGuid());
+        try
+        {
+            var engine = new TuningEngine(gpu, new SimulatedWorkloadRunner(gpu), new JsonAuditStore(path),
+                new SimulationRollbackGuard(), new TunePolicy(new SafetyEnvelope()));
+            var report = await engine.RunAsync(new TunePlan([gpu.Current with { VoltageOffsetMv = -15 }]));
+            var eventPath = Path.Combine(path, report.Id.ToString("N") + ".events.jsonl");
+            Assert.True(File.Exists(eventPath));
+            var lines = await File.ReadAllLinesAsync(eventPath);
+            Assert.Contains(lines, l => l.Contains("\"Kind\":\"candidate\"", StringComparison.Ordinal));
+            Assert.Contains(lines, l => l.Contains("\"Kind\":\"final-rollback\"", StringComparison.Ordinal));
+            Assert.True(report.RollbackVerified);
+        }
+        finally { if (Directory.Exists(path)) Directory.Delete(path, true); }
+    }
 }

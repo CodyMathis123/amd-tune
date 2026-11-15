@@ -8,6 +8,20 @@ public sealed class JsonAuditStore(string directory) : IAuditStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    private readonly SemaphoreSlim _journalGate = new(1, 1);
+
+    public async Task AppendEventAsync(Guid sessionId, AuditEvent item, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, sessionId.ToString("N") + ".events.jsonl");
+        await _journalGate.WaitAsync(cancellationToken);
+        try
+        {
+            await File.AppendAllTextAsync(path, JsonSerializer.Serialize(item) + Environment.NewLine, cancellationToken);
+        }
+        finally { _journalGate.Release(); }
+    }
+
     public async Task SaveAsync(RunReport report, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(directory);

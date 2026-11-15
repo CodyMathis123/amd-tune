@@ -45,6 +45,8 @@ public sealed record TrialResult(
     DateTimeOffset At,
     IReadOnlyList<KindComparison>? Comparisons = null);
 
+public sealed record AuditEvent(DateTimeOffset At, string Kind, string Detail, TuningSettings? Settings = null);
+
 public sealed record RunProgress(
     RunPhase Phase,
     string Message,

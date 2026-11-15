@@ -22,6 +22,7 @@ public sealed class TuningEngine(
             throw new SafetyException("Another tuning session is already running.");
 
         var started = DateTimeOffset.UtcNow;
+        var sessionId = Guid.NewGuid();
         var trialResults = new List<TrialResult>();
         var phase = RunPhase.Discovering;
         TuningSettings? original = null;
@@ -39,6 +40,8 @@ public sealed class TuningEngine(
             Emit(RunPhase.Discovering, "Discovering device capabilities and current driver state");
             capabilities = await device.DiscoverAsync(cancellationToken);
             original = await device.ReadSettingsAsync(cancellationToken);
+            await audit.AppendEventAsync(sessionId, new AuditEvent(DateTimeOffset.UtcNow,
+                "baseline", "Original settings observed before any write.", original), cancellationToken);
             policy.Validate(capabilities, original, plan);
             if (!capabilities.IsSimulation && !guard.IsIndependent)
                 throw new SafetyException("Live writes require an independent recovery process.");
@@ -49,6 +52,8 @@ public sealed class TuningEngine(
             // Arm before the first write; restore even on cancellation, failed validation or exceptions.
             await guard.ArmAsync(original, cancellationToken);
             guardArmed = true;
+            await audit.AppendEventAsync(sessionId, new AuditEvent(DateTimeOffset.UtcNow,
+                "recovery", "Independent guard armed; baseline recoverable.", original), cancellationToken);
 
             foreach (var candidate in plan.Candidates)
             {
@@ -61,15 +66,21 @@ public sealed class TuningEngine(
                 var before = await ExecutePasses(cancellationToken);
 
                 Emit(RunPhase.Applying, $"B: applying candidate {trialResults.Count + 1}/{plan.Candidates.Count}");
+                await audit.AppendEventAsync(sessionId, new AuditEvent(DateTimeOffset.UtcNow,
+                    "candidate", "Attempting candidate write. Recovery guard must be alive.", candidate), cancellationToken);
                 await device.ApplyAsync(candidate, cancellationToken);
                 Emit(RunPhase.Verifying, "Verifying requested values against driver readback");
                 TunePolicy.RequireReadback(candidate, await device.ReadSettingsAsync(cancellationToken));
+                await audit.AppendEventAsync(sessionId, new AuditEvent(DateTimeOffset.UtcNow,
+                    "readback", "Requested settings confirmed by ADLX.", candidate), cancellationToken);
                 var candidateResults = await ExecutePasses(cancellationToken);
                 var reading = await device.ReadTelemetryAsync(cancellationToken);
                 TunePolicy.RequireTelemetry(reading, plan.MaxHotspotC);
 
                 Emit(RunPhase.RollingBack, "Restoring original settings before reference repeat");
                 await RestoreAndVerify(original);
+                await audit.AppendEventAsync(sessionId, new AuditEvent(DateTimeOffset.UtcNow,
+                    "rollback", "Original driver state restored and read back.", original), cancellationToken);
                 Emit(RunPhase.Baseline, "A: repeating stock reference to quantify drift");
                 var after = await ExecutePasses(cancellationToken);
                 var comparisons = MeasurementAnalysis.Compare(before, candidateResults, after);
@@ -135,6 +146,16 @@ public sealed class TuningEngine(
             }
             if (guardArmed && rollbackVerified)
             {
+                try
+                {
+                    await audit.AppendEventAsync(sessionId, new AuditEvent(DateTimeOffset.UtcNow,
+                        "final-rollback", "Original settings independently verified after session.", original!), CancellationToken.None);
+                }
+                catch (Exception journalError)
+                {
+                    phase = RunPhase.Failed;
+                    error = (error is null ? "" : error + " | ") + "Audit journal failed: " + journalError.Message;
+                }
                 try { await guard.DisarmAsync(CancellationToken.None); }
                 catch (Exception ex)
                 {
@@ -146,7 +167,7 @@ public sealed class TuningEngine(
             _exclusive.Release();
         }
 
-        var report = new RunReport(Guid.NewGuid(),
+        var report = new RunReport(sessionId,
             capabilities?.Name ?? "Unavailable",
             capabilities?.Backend ?? "Unavailable",
             capabilities?.IsSimulation ?? false,

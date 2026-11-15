@@ -19,6 +19,7 @@ public interface IWorkloadRunner
 public interface IAuditStore
 {
     Task SaveAsync(RunReport report, CancellationToken cancellationToken);
+    Task AppendEventAsync(Guid sessionId, AuditEvent item, CancellationToken cancellationToken);
 }
 
 /// <summary>Required for hardware writes. Must be a separate process able to restore a snapshot.</summary>

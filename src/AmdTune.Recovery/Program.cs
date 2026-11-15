@@ -3,6 +3,13 @@ using System.Text.Json;
 using AmdTune.Core;
 using AmdTune.Infrastructure;
 
+// Runtime self-check never accesses ADLX, opens a lease, or writes GPU settings.
+if (args.Length == 1 && args[0] == "--self-check")
+{
+    Console.WriteLine("RECOVERY_RUNTIME_OK");
+    return 0;
+}
+
 // A standalone process: parent process crashes must not prevent rollback.
 // Operates only on an explicitly written local lease. Does NOT apply tuning at startup.
 if (args.Length != 2 || args[0] != "--lease")

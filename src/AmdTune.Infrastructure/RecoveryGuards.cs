@@ -24,6 +24,9 @@ public sealed class ExternalRecoveryGuard(string directory, string recoveryExecu
 {
     private string? _lease;
     private Process? _guard;
+    private RecoveryHeartbeat? _heartbeat;
+    private long _lastEngineProgress;
+    private static readonly TimeSpan MaxStalledWorkload = TimeSpan.FromSeconds(120);
     public bool IsIndependent => File.Exists(recoveryExecutable) && File.Exists(bridge.PathOnDisk);
 
     public async Task ArmAsync(TuningSettings baseline, CancellationToken ct)
@@ -48,14 +51,38 @@ public sealed class ExternalRecoveryGuard(string directory, string recoveryExecu
             await Task.Delay(100, ct);
         if (!File.Exists(ready) || _guard.HasExited)
             throw new SafetyException("Recovery process did not acknowledge readiness.");
+        Volatile.Write(ref _lastEngineProgress, Stopwatch.GetTimestamp());
+        _heartbeat = new RecoveryHeartbeat(BeatAsync, TimeSpan.FromSeconds(2));
+        _heartbeat.Start();
     }
 
     public Task PulseAsync(CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+        _heartbeat?.ThrowIfFailed();
+        BeatAsync(ct).GetAwaiter().GetResult();
+        Volatile.Write(ref _lastEngineProgress, Stopwatch.GetTimestamp());
+        return Task.CompletedTask;
+    }
+
+    private Task BeatAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
         if (_lease is null || _guard is null || _guard.HasExited)
-            throw new SafetyException("Recovery process is no longer alive.");
-        // The guard uses the lease's mtime as heartbeat.
-        return WriteAtomically(_lease, File.ReadAllText(_lease), ct);
+            throw new SafetyException("Independent recovery process is no longer alive.");
+        if (Stopwatch.GetElapsedTime(Volatile.Read(ref _lastEngineProgress)) > MaxStalledWorkload)
+            throw new SafetyException("Experiment exceeded its 120-second forward-progress guard.");
+        File.SetLastWriteTimeUtc(_lease, DateTime.UtcNow);
+        return Task.CompletedTask;
+    }
+
+    private async Task StopHeartbeatAsync()
+    {
+        if (_heartbeat is not null)
+        {
+            await _heartbeat.DisposeAsync();
+            _heartbeat = null;
+        }
     }
 
     public async Task DisarmAsync(CancellationToken ct)
@@ -70,13 +97,14 @@ public sealed class ExternalRecoveryGuard(string directory, string recoveryExecu
             _guard.Dispose();
             _guard = null;
         }
+        await StopHeartbeatAsync();
         _lease = null;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        await StopHeartbeatAsync();
         _guard?.Dispose(); // Never kill guard on failure; it must outlive this process.
-        return ValueTask.CompletedTask;
     }
 
     private static async Task WriteAtomically(string path, string contents, CancellationToken ct)

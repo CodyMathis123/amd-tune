@@ -14,7 +14,7 @@ This is an experimental, transparent C#/.NET 10 system for discovery, real GPU c
 | Capability-aware guided voltage sweep | Implemented; generates conservative, driver-range-valid candidates and restores after each trial |
 | DirectX 12 integer correctness workload | ComputeSharp 3.2.0; checks every output element against CPU oracle; hardware validation pending |
 | Simulation and dependency-injected mocks | Implemented |
-| Independent process recovery after host crash | Implemented; **must fault-inject and validate on Windows hardware** |
+| Independent process recovery after host crash | Startup/disarm verified on a physical Windows machine; restoration after a hardware trial remains unverified |
 | Rollback after success, failure, cancellation | Implemented; driver readback verified |
 | JSON audit records plus crash-survivable JSONL event journal | Implemented at LocalAppData/AmdTune/reports |
 | Long-running gaming stability prediction | **Not claimed**; out of scope until validated |
@@ -105,7 +105,7 @@ The projects separate concerns via interfaces. Changing the UI must not change p
 - Real bridge compilation and actual GPU behavior are pending tests on a Windows RX 9070 XT. Simulator tests do not prove device safety.
 - ComputeSharp selects its default DirectX adapter; we refuse runs if its recognizable RX model differs from ADLX. Identical GPUs need stronger identity matching in a future extension.
 - Reported throughput includes transfers and is **not** a calibrated hardware bandwidth or GFLOPS measurement.
-- A GPU crash can still freeze Windows. The recovery process cannot operate across power loss or an OS-level hang; the app never creates a logon auto-apply task.
+- A GPU crash can still freeze Windows. The recovery process cannot operate across power loss or an OS-level hang; the app never creates a logon auto-apply task. The watchdog pulses independently from the benchmark every two seconds and stops after a 120-second experiment forward-progress stall. Each GPU workload has a 90-second cancellation budget. Some driver hangs cannot be interrupted by managed cancellation.
 - The workload mix and duration are insufficient to validate long-term gaming stability. Use independent stress and real games for confirmation.
 - This version never retains tuned settings after a completed experiment; candidate export/persistent application require separately designed validation.
 

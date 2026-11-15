@@ -167,4 +167,29 @@ public class ExperimentTests
         var outcome = await monitor.RunAsync(gpu.Current, default);
         Assert.Equal(RecoveryOutcome.Disarmed, outcome);
     }
+    [Fact]
+    public async Task Independent_heartbeat_runs_while_primary_workload_waits()
+    {
+        int ticks = 0;
+        await using var heartbeat = new RecoveryHeartbeat(
+            ct => { Interlocked.Increment(ref ticks); return Task.CompletedTask; },
+            TimeSpan.FromMilliseconds(15));
+        heartbeat.Start();
+        await Task.Delay(110);
+        heartbeat.ThrowIfFailed();
+        Assert.True(Volatile.Read(ref ticks) >= 3, "Background heartbeats should run without foreground progress.");
+    }
+
+    [Fact]
+    public async Task Failed_background_heartbeat_is_reported_to_engine()
+    {
+        await using var heartbeat = new RecoveryHeartbeat(
+            ct => throw new IOException("Injected heartbeat failure"),
+            TimeSpan.FromMilliseconds(10));
+        heartbeat.Start();
+        await Task.Delay(100);
+        var result = Assert.Throws<InvalidOperationException>(() => heartbeat.ThrowIfFailed());
+        Assert.IsType<IOException>(result.InnerException);
+    }
+
 }

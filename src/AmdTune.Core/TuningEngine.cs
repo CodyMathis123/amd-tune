@@ -194,7 +194,20 @@ public sealed class TuningEngine(
                     await guard.PulseAsync(ct);
                     TunePolicy.RequireTelemetry(await device.ReadTelemetryAsync(ct), plan.MaxHotspotC);
                     Emit(RunPhase.Benchmarking, $"{kind} pass {repetition + 1}/{plan.Repetitions}");
-                    var value = await workload.RunAsync(kind, plan.Seed + repetition, ct);
+                    // Individual workloads have a finite budget. The watchdog's
+                    // separate progress deadline is a fallback if a driver ignores cancellation.
+                    using var workloadBudget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    workloadBudget.CancelAfter(TimeSpan.FromSeconds(90));
+                    WorkloadMeasurement value;
+                    try
+                    {
+                        value = await workload.RunAsync(kind, plan.Seed + repetition, workloadBudget.Token);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new SafetyException($"{kind} workload exceeded its 90-second execution budget.");
+                    }
+                    await guard.PulseAsync(ct);
                     measurements.Add(value);
                     if (!value.Correct || value.Mismatches > 0)
                         throw new SafetyException($"GPU correctness failed for {kind}: {value.Detail}");

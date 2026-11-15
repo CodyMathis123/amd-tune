@@ -52,6 +52,20 @@ The package CI now runs the recovery executable's no-write `--self-check` and a 
 
 Expected: `RECOVERY_RUNTIME_OK` and `RECOVERY_HANDSHAKE_PASS`. The handshake starts a recovery process with the parent alive, checks the readiness file, then disarms it; it does not intentionally call the AMD bridge or modify the GPU. Do not forcibly kill the parent during this diagnostic.
 
+## Gate 0C — Watchdog heartbeat and bounded benchmark progress
+
+The operator's independent watchdog startup/disarm test **passed on actual Windows hardware** (2026-11-15):
+
+- Local publish and recovery executable `--self-check`: `RECOVERY_RUNTIME_OK`
+- Real independent recovery process no-write handshake: `RECOVERY_HANDSHAKE_PASS`
+- Read-only driver state afterward: 0 mV, 2518 MHz, default timing, 25°C hotspot, 10 W board power
+
+Code review found that the original watchdog lease was only refreshed *between* workloads, while the recovery monitor considered a lease stale after 20 seconds. A sufficiently slow valid DX12 test could therefore trigger an unintended rollback mid-benchmark.
+
+The engine now has a **separate two-second heartbeat** independent of benchmark execution, a **90-second per-workload cancellation budget**, and a **120-second forward-progress deadline**. A stalled experiment eventually stops heartbeating, allowing the watchdog to restore the original settings after its 20-second lease timeout. These are engineering safety bounds, not assertions that GPU hangs are always recoverable.
+
+CI tests the heartbeat timer independently with injected failures. Physical GPU workload and rollback behavior remain unverified and must be observed during Gate 1.
+
 ## Gate 1 — conservative first write (will modify hardware)
 
 Only proceed after verifying Gate 0. Stop other tuning tools (Adrenalin's manual profile editor, MSI Afterburner, etc.). Save important work. Real GPU instability may reset the display driver or system.

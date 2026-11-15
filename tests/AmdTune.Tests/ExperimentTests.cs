@@ -9,6 +9,7 @@ public class ExperimentTests
     private sealed class Store : IAuditStore
     {
         public RunReport? Saved { get; private set; }
+        public Task AppendEventAsync(Guid id, AuditEvent item, CancellationToken ct) => Task.CompletedTask;
         public Task SaveAsync(RunReport report, CancellationToken ct)
         {
             Saved = report;

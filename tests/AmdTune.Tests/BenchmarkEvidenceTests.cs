@@ -267,4 +267,76 @@ public class BenchmarkEvidenceTests
         }
     }
 
+    [Fact]
+    public async Task Repeated_ADLX_source_timestamps_cannot_be_counted_as_independent_loaded_samples()
+    {
+        var gpu = new TimestampedStreamingDevice(usage: 64, repeated: true);
+        using var run = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(
+            gpu, 90, run, TimeSpan.FromMilliseconds(125));
+        sampler.Start();
+        await gpu.FiveSamples.WaitAsync(TimeSpan.FromSeconds(3));
+        var result = await sampler.StopAsync();
+        Assert.True(result.SampleCount >= 5);
+        Assert.Equal(1, result.ActiveSamples);
+        Assert.False(result.HasUsefulLoadEvidence);
+        Assert.NotNull(result.Diagnostics);
+        Assert.True(result.Diagnostics.NativeMetricTimestampsAvailable);
+        Assert.Equal(1, result.Diagnostics.DistinctMetricSamples);
+        Assert.Equal(result.SampleCount - 1, result.Diagnostics.RepeatedMetricSamples);
+        Assert.Equal(64, result.Diagnostics.MaximumUtilizationPercent);
+    }
+
+    [Fact]
+    public async Task Low_reported_usage_is_diagnostic_not_proof_the_GPU_was_idle()
+    {
+        var gpu = new TimestampedStreamingDevice(usage: 31, repeated: false);
+        using var run = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(
+            gpu, 90, run, TimeSpan.FromMilliseconds(125));
+        sampler.Start();
+        await gpu.FiveSamples.WaitAsync(TimeSpan.FromSeconds(3));
+        var evidence = await sampler.StopAsync();
+        Assert.True(evidence.SampleCount >= 5);
+        Assert.Equal(0, evidence.ActiveSamples);
+        Assert.False(evidence.HasUsefulLoadEvidence);
+        Assert.NotNull(evidence.Diagnostics);
+        Assert.InRange(evidence.Diagnostics.DistinctMetricSamples, 5, 256);
+        Assert.Equal(31, evidence.Diagnostics.MinimumUtilizationPercent);
+        Assert.Equal(31, evidence.Diagnostics.MaximumUtilizationPercent);
+        Assert.True(evidence.Diagnostics.PositiveClockSamples >= 5);
+        Assert.True(evidence.Diagnostics.PositiveUtilizationSamples >= 5);
+    }
+
+    private sealed class TimestampedStreamingDevice(double usage, bool repeated)
+        : IGpuDevice, IStreamingGpuTelemetryDevice
+    {
+        private readonly SimulatedGpuDevice _simulation = new();
+        private readonly TaskCompletionSource<bool> _five =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly long _sourceTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        public Task FiveSamples => _five.Task;
+        public Task<DeviceCapabilities> DiscoverAsync(CancellationToken ct)
+            => _simulation.DiscoverAsync(ct);
+        public Task<TuningSettings> ReadSettingsAsync(CancellationToken ct)
+            => _simulation.ReadSettingsAsync(ct);
+        public Task ApplyAsync(TuningSettings s, CancellationToken ct)
+            => throw new SafetyException("Read-only timestamp fixture must never apply tuning.");
+        public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
+            => throw new InvalidOperationException("Expected stream-based sample");
+        public async IAsyncEnumerable<GpuTelemetry> StreamTelemetryAsync(
+            TimeSpan interval,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            for (var i = 0; !ct.IsCancellationRequested; i++)
+            {
+                if (i >= 4) _five.TrySetResult(true);
+                yield return new GpuTelemetry(
+                    DateTimeOffset.UtcNow, 45, 90, 1900, 1500,
+                    usage, _sourceTime + (repeated ? 0 : i * 125L));
+                await Task.Delay(6, ct);
+            }
+        }
+    }
+
 }

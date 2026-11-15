@@ -129,10 +129,16 @@ static int Execute(int argc,char** argv) {
                 throw std::runtime_error("Required live GPU metrics unavailable.");
             adlx_double usage=0;
             const bool hasUsage=ADLX_SUCCEEDED(sample->GPUUsage(&usage)) && usage>=0 && usage<=100;
+            adlx_int64 metricTimeMs=0;
+            const bool hasMetricTime=ADLX_SUCCEEDED(sample->TimeStamp(&metricTimeMs)) &&
+                metricTimeMs>0;
             std::cout<<"{\"at\":\""<<IsoUtc()<<"\",\"hotspotC\":"<<hotspot<<",\"boardPowerW\":"
                      <<power<<",\"coreClockMhz\":"<<core<<",\"memoryClockMhz\":"<<memory
                      <<",\"utilizationPercent\":";
             if (hasUsage) std::cout<<usage;
+            else std::cout<<"null";
+            std::cout<<",\"metricTimestampMs\":";
+            if (hasMetricTime) std::cout<<metricTimeMs;
             else std::cout<<"null";
             // std::endl flushes *each* NDJSON sample for immediate ingestion.
             std::cout<<"}"<<std::endl;

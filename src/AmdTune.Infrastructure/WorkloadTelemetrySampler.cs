@@ -83,8 +83,34 @@ public sealed class WorkloadTelemetrySampler(
             throw new SafetyException("GPU telemetry sampling failed or exceeded a thermal guard: " + _error.Message);
         var end = DateTimeOffset.UtcNow;
         var samples = _samples.ToArray();
-        var active = samples.Where(s => s.UtilizationPercent is >= 50 and <= 100 &&
-                                         s.CoreClockMhz is > 0).ToArray();
+        // ADLX may publish metrics less often than this helper requests them.
+        // When the actual source timestamp is available, do not count a
+        // repeated reading as an independent active sample.
+        var timestamped = samples.Where(s => s.MetricTimestampMs is > 0).ToArray();
+        var allTimestamped = timestamped.Length == samples.Length && samples.Length > 0;
+        var independent = allTimestamped
+            ? samples.GroupBy(s => s.MetricTimestampMs!.Value).Select(g => g.First()).ToArray()
+            : samples;
+        var active = independent.Where(s => s.UtilizationPercent is >= 50 and <= 100 &&
+                                             s.CoreClockMhz is > 0).ToArray();
+        var utilization = independent.Where(s => s.UtilizationPercent is >= 0 and <= 100)
+            .Select(s => s.UtilizationPercent!.Value).ToArray();
+        var uniqueTimes = independent.Where(s => s.MetricTimestampMs is > 0)
+            .Select(s => s.MetricTimestampMs!.Value).Order().ToArray();
+        var intervals = uniqueTimes.Skip(1)
+            .Zip(uniqueTimes, (next, previous) => (double)(next - previous))
+            .Where(ms => ms > 0).ToArray();
+        var diagnostic = new TelemetrySampleDiagnostics(
+            samples.Length,
+            independent.Length,
+            allTimestamped ? samples.Length - independent.Length : 0,
+            allTimestamped,
+            utilization.Length > 0 ? utilization.Min() : null,
+            utilization.Length > 0 ? utilization.Max() : null,
+            utilization.Length > 0 ? utilization.Average() : null,
+            intervals.Length > 0 ? intervals.Average() : null,
+            independent.Count(s => s.CoreClockMhz is > 0),
+            independent.Count(s => s.UtilizationPercent is > 0 and <= 100));
         static double? MeanOrNull(IEnumerable<double> values)
         {
             var v = values.Where(double.IsFinite).ToArray();
@@ -99,7 +125,8 @@ public sealed class WorkloadTelemetrySampler(
             MeanOrNull(active.Where(s => s.BoardPowerW is > 0).Select(s => s.BoardPowerW!.Value)),
             MeanOrNull(active.Select(s => s.UtilizationPercent!.Value)),
             MeanOrNull(active.Select(s => (double)s.CoreClockMhz!.Value)),
-            samples);
+            samples,
+            diagnostic);
     }
 
     public async ValueTask DisposeAsync()

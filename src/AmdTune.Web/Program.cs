@@ -36,6 +36,22 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 builder.WebHost.UseUrls("http://127.0.0.1:5783");
 var hardware = args.Contains("--hardware", StringComparer.OrdinalIgnoreCase);
 var writeRequested = args.Contains("--enable-hardware-writes", StringComparer.OrdinalIgnoreCase);
+var verifyGpu = args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase);
+int? readOnlySamplingIntervalMs = null;
+var sampleIntervalIndex = Array.FindIndex(args, a =>
+    string.Equals(a, "--telemetry-interval-ms", StringComparison.OrdinalIgnoreCase));
+if (sampleIntervalIndex >= 0)
+{
+    if (!verifyGpu || !args.Contains("--hardware", StringComparer.OrdinalIgnoreCase) || writeRequested)
+        throw new InvalidOperationException(
+            "--telemetry-interval-ms requires read-only --hardware --verify-gpu. It cannot be used for tuning writes.");
+    if (sampleIntervalIndex + 1 >= args.Length ||
+        !int.TryParse(args[sampleIntervalIndex + 1], out var requestedInterval) ||
+        requestedInterval is < 100 or > 1000)
+        throw new ArgumentOutOfRangeException(nameof(args),
+            "ADLX telemetry interval must be between 100 and 1000 milliseconds.");
+    readOnlySamplingIntervalMs = requestedInterval;
+}
 var extendedBenchmark = args.Contains("--extended-benchmark", StringComparer.OrdinalIgnoreCase);
 var sustainedBenchmark = args.Contains("--sustained-benchmark", StringComparer.OrdinalIgnoreCase);
 if (sustainedBenchmark && !hardware)
@@ -65,7 +81,12 @@ if (hardware)
         sustainedBenchmark
             ? new SustainedGpuBenchmarkRunner(sp.GetRequiredService<IGpuDevice>())
             : new ComputeSharpWorkloadRunner(sp.GetRequiredService<IGpuDevice>(), extendedBenchmark));
-    builder.Services.AddSingleton<IWorkloadTelemetryRecorder, WorkloadTelemetryRecorder>();
+    builder.Services.AddSingleton<IWorkloadTelemetryRecorder>(sp =>
+        new WorkloadTelemetryRecorder(
+            sp.GetRequiredService<IGpuDevice>(),
+            readOnlySamplingIntervalMs.HasValue
+                ? TimeSpan.FromMilliseconds(readOnlySamplingIntervalMs.Value)
+                : null));
 }
 else
 {
@@ -105,6 +126,8 @@ if (args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase))
     var runner = app.Services.GetRequiredService<IWorkloadRunner>();
     var telemetryRecorder = app.Services.GetRequiredService<IWorkloadTelemetryRecorder>();
     Console.WriteLine("GPU VERIFY: read-only DX12 tests, no driver tuning writes.");
+    Console.WriteLine("ADLX telemetry interval requested: " + (readOnlySamplingIntervalMs ?? 125) +
+                      " ms (native metric publication may be slower).");
     Console.WriteLine("Benchmark profile: " + (sustainedBenchmark ? "SUSTAINED-HOST-TIMED" : extendedBenchmark ? "EXTENDED" : "QUICK") +
                       (soakSeconds > 0 ? $"; CORRECTNESS SOAK for >= {soakSeconds}s" : ""));
     var baseline = await gpu.ReadSettingsAsync(CancellationToken.None);
@@ -133,6 +156,15 @@ if (args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase))
                     $"checked={result.CheckedElements}, mismatches={result.Mismatches}, " +
                     $"score={result.Score:N0} {result.ScoreUnit}, duration={result.ElapsedMilliseconds:N1} ms");
                 Console.WriteLine(result.Detail);
+                var diagnostics = result.TelemetryEvidence?.Diagnostics;
+                Console.WriteLine($"ADLX observed utilization: " +
+                    $"{diagnostics?.MinimumUtilizationPercent?.ToString("F1") ?? "missing"}-" +
+                    $"{diagnostics?.MaximumUtilizationPercent?.ToString("F1") ?? "missing"}%, " +
+                    $"mean={diagnostics?.MeanUtilizationPercent?.ToString("F1") ?? "missing"}%; " +
+                    $"distinct metric timestamps={diagnostics?.DistinctMetricSamples ?? 0}/" +
+                    $"{diagnostics?.RawSamples ?? 0}; repeated={diagnostics?.RepeatedMetricSamples ?? 0}; " +
+                    $"mean metric publication interval=" +
+                    $"{diagnostics?.MeanObservedMetricIntervalMs?.ToString("F0") ?? "unknown"} ms");
                 Console.WriteLine($"ADLX samples={result.TelemetryEvidence?.SampleCount ?? 0}; " +
                     $"active samples={result.TelemetryEvidence?.ActiveSamples ?? 0}; " +
                     $"loaded mean power={result.TelemetryEvidence?.MeanActiveBoardPowerW?.ToString("F1") ?? "not measured"} W");
@@ -181,6 +213,7 @@ if (args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase))
             StartedAt = sessionStarted,
             FinishedAt = DateTimeOffset.UtcNow,
             RequestedSoakSeconds = soakSeconds,
+            RequestedTelemetryIntervalMs = readOnlySamplingIntervalMs ?? 125,
             BenchmarkProfile = sustainedBenchmark ? "sustained" : extendedBenchmark ? "extended" : "quick",
             OriginalSettings = baseline,
             FinalSettings = final,

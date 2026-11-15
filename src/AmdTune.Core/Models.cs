@@ -23,7 +23,14 @@ public sealed record DeviceCapabilities(
     IReadOnlyList<string> Warnings);
 
 public sealed record TuningSettings(int VoltageOffsetMv, int MemoryClockMhz, MemoryTimingMode MemoryTiming);
-public sealed record GpuTelemetry(DateTimeOffset At, double? HotspotC, double? BoardPowerW, int? CoreClockMhz, int? MemoryClockMhz, double? UtilizationPercent = null);
+public sealed record GpuTelemetry(
+    DateTimeOffset At,
+    double? HotspotC,
+    double? BoardPowerW,
+    int? CoreClockMhz,
+    int? MemoryClockMhz,
+    double? UtilizationPercent = null,
+    long? MetricTimestampMs = null);
 
 public sealed record WorkloadMeasurement(
     WorkloadKind Kind,
@@ -51,11 +58,28 @@ public sealed record WorkloadTelemetryEvidence(
     double? MeanActiveBoardPowerW,
     double? MeanActiveUtilizationPercent,
     double? MeanActiveCoreClockMhz,
-    IReadOnlyList<GpuTelemetry> Samples)
+    IReadOnlyList<GpuTelemetry> Samples,
+    TelemetrySampleDiagnostics? Diagnostics = null)
 {
     public bool HasUsefulLoadEvidence => ActiveSamples >= 3 &&
         MeanActiveBoardPowerW is > 0 && MeanActiveCoreClockMhz is > 0;
 }
+
+/// <summary>
+/// Diagnostics for actual AMD metric publication cadence and observed utilization.
+/// Re-reading the same ADLX timestamp is not an independent sensor sample.
+/// </summary>
+public sealed record TelemetrySampleDiagnostics(
+    int RawSamples,
+    int DistinctMetricSamples,
+    int RepeatedMetricSamples,
+    bool NativeMetricTimestampsAvailable,
+    double? MinimumUtilizationPercent,
+    double? MaximumUtilizationPercent,
+    double? MeanUtilizationPercent,
+    double? MeanObservedMetricIntervalMs,
+    int PositiveClockSamples,
+    int PositiveUtilizationSamples);
 
 public sealed record TrialResult(
     TuningSettings Settings,

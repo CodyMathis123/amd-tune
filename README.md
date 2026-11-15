@@ -81,6 +81,27 @@ If you already have third_party/ADLX, skip the clone and keep the pinned revisio
 
 The UI shows actual ADLX capabilities, raw driver limits and device name; candidates cannot be submitted.
 
+### Diagnosing ADLX stream publication cadence and monitoring overhead
+
+If the sustained read-only test reports `ActiveSamples=0` despite
+correct GPU execution, **do not** assume the GPU was idle. The current
+heuristic requires reported utilization >=50%; the next diagnostic prints
+the actual utilization range and the number of distinct AMD metrics
+timestamps (the native helper may read the same published sample
+multiple times). This diagnostic is read-only and keeps thermal guards:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark --telemetry-interval-ms 125
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark --telemetry-interval-ms 500
+
+The new `metricTimestampMs` comes from AMD ADLX and can distinguish
+a new source measurement from a repeat observation of the same sample.
+The two tests must run at the same Adrenalin tuning settings for a
+meaningful comparison of measurement *interference*. The sampling
+interval override is disallowed with `--enable-hardware-writes`.
+Neither result establishes stock overclocking performance or sustained
+efficiency. Save your custom Adrenalin profile and restore defaults
+before collecting factory-stock reference sessions.
+
 ## Native read-only telemetry streaming (workload instrumentation iteration)
 
 The 60-second soak recorded only **81 ADLX samples over 60 measurements**.

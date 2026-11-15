@@ -1,3 +1,4 @@
+using AmdTune.Core;
 using AmdTune.GpuWorkloads;
 using Xunit;
 
@@ -52,4 +53,30 @@ public sealed class GpuDispatchTests
         Assert.Equal(0, slices[0].Offset);
         Assert.Equal(2_099_999, slices[^1].Offset + slices[^1].Length - 1);
     }
+    [Theory]
+    [InlineData(WorkloadKind.Compute, 2, 16)]
+    [InlineData(WorkloadKind.Memory, 2, 12)]
+    [InlineData(WorkloadKind.Mixed, 2, 16)]
+    public void Extended_profile_has_bounded_timed_and_warmup_passes(
+        WorkloadKind kind, int warmup, int measured)
+    {
+        var profile = GpuExecutionProfile.For(kind, true);
+        profile.Validate();
+        Assert.Equal(warmup, profile.UntimedWarmupPasses);
+        Assert.Equal(measured, profile.MeasuredPasses);
+        Assert.InRange(profile.TotalPasses, 1, 32);
+    }
+
+    [Theory]
+    [InlineData(WorkloadKind.Compute)]
+    [InlineData(WorkloadKind.Memory)]
+    [InlineData(WorkloadKind.Mixed)]
+    public void Quick_profile_remains_single_pass_for_fast_correctness(WorkloadKind kind)
+    {
+        var profile = GpuExecutionProfile.For(kind, false);
+        profile.Validate();
+        Assert.Equal(0, profile.UntimedWarmupPasses);
+        Assert.Equal(1, profile.MeasuredPasses);
+    }
+
 }

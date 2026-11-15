@@ -82,7 +82,10 @@ async function init() {
     securityToken = info.csrfToken;
     canWrite = info.canWrite;
     value('mode', info.mode.toUpperCase() + (info.canWrite ? ' • experiment enabled' : ' • READ ONLY'));
-    value('notice', info.warning);
+    value('notice', info.warning + ' Benchmark profile: ' +
+      (info.benchmarkProfile === 'extended'
+        ? 'EXTENDED — warmup and repeated bounded dispatches; longer execution.'
+        : 'QUICK — short correctness/throughput checks.'));
     capabilities = await request('/api/discover');
     settings = await request('/api/settings');
     value('device', JSON.stringify({ name: capabilities.name, backend: capabilities.backend,

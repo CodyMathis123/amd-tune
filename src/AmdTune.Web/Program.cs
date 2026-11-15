@@ -36,6 +36,10 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 builder.WebHost.UseUrls("http://127.0.0.1:5783");
 var hardware = args.Contains("--hardware", StringComparer.OrdinalIgnoreCase);
 var writeRequested = args.Contains("--enable-hardware-writes", StringComparer.OrdinalIgnoreCase);
+var extendedBenchmark = args.Contains("--extended-benchmark", StringComparer.OrdinalIgnoreCase);
+if (extendedBenchmark && !hardware)
+    throw new InvalidOperationException("--extended-benchmark requires --hardware.");
+
 if (writeRequested && !hardware) throw new InvalidOperationException("Write flag only valid with --hardware.");
 if (hardware && !OperatingSystem.IsWindows())
     throw new PlatformNotSupportedException("AMD ADLX hardware mode currently requires Windows.");
@@ -52,7 +56,8 @@ if (hardware)
     builder.Services.AddSingleton<IGpuDevice, AdlxBridgeGpuDevice>();
     builder.Services.AddSingleton<IRollbackGuard>(_ =>
         new ExternalRecoveryGuard(Path.Combine(dataDir, "recovery"), recoveryPath, bridge));
-    builder.Services.AddSingleton<IWorkloadRunner, ComputeSharpWorkloadRunner>();
+    builder.Services.AddSingleton<IWorkloadRunner>(sp =>
+        new ComputeSharpWorkloadRunner(sp.GetRequiredService<IGpuDevice>(), extendedBenchmark));
 }
 else
 {
@@ -77,6 +82,7 @@ if (args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase))
     var gpu = app.Services.GetRequiredService<IGpuDevice>();
     var runner = app.Services.GetRequiredService<IWorkloadRunner>();
     Console.WriteLine("GPU VERIFY: read-only DX12 tests, no driver tuning writes.");
+    Console.WriteLine("Benchmark profile: " + (extendedBenchmark ? "EXTENDED (untimed GPU warmup + bounded repeated dispatch)" : "QUICK"));
     var baseline = await gpu.ReadSettingsAsync(CancellationToken.None);
     try
     {
@@ -143,6 +149,7 @@ app.UseStaticFiles();
 app.MapGet("/api/info", () => new
 {
     mode = hardware ? "hardware" : "simulation",
+    benchmarkProfile = extendedBenchmark ? "extended" : "quick",
     canWrite = !hardware || writeRequested,
     recoveryInstalled = File.Exists(recoveryPath),
     bridgeInstalled = File.Exists(bridgePath),

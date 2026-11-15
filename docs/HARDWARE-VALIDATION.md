@@ -153,6 +153,35 @@ User-supplied report ID `27090c55-1ae9-4a37-9785-5532c2a7b914` from Windows RX 9
 
 **Next method improvements before optimization:** warmup, longer sustained work, isolate GPU-only timing from readback/transfer overhead, sample power/clocks/temperature during GPU activity, and treat correctness, stability, and performance confidence as separate outcomes. Increasing repetitions from 3 to 7 improves the sample count but cannot eliminate systematic drift from timed sequence or cold/warm state. Do not sweep voltage or VRAM on the current performance evidence.
 
+## Extended benchmark profile — next validation gate
+
+The operator also supplied report `9b6761c9-e3dd-475c-ba94-47061b3f96ef`
+with seven repetitions at -15 mV, completed with zero mismatches,
+`RollbackVerified=true`, and an inconclusive performance verdict. Relative to
+the 3-repetition run, stock-to-stock memory drift fell from -25.62% to +3.81%,
+but compute stock-before CV reached 29.23% and mixed candidate CV 13.27%.
+Increasing repetition count alone did not establish repeatable performance gain.
+
+The opt-in `--extended-benchmark` profile uses two untimed warmup passes and
+16/12/16 measured passes for Compute/Memory/Mixed. The existing memory dispatch
+partition is kept; outputs are compared to a CPU reference after **all** GPU
+passes. It provides more work per measurement, but it still does not offer
+GPU-only timestamp queries, power-efficiency measurements, or minutes-long
+stability testing. The app continues to restore stock after experiments.
+
+**First test (read-only):**
+
+    git pull --ff-only
+    ./scripts/publish-windows.ps1
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --extended-benchmark
+    ./scripts/hardware-doctor.ps1
+
+**Only if the read-only check passes**, optionally run one -15 mV experiment
+using `--hardware --enable-hardware-writes --extended-benchmark`, with 3 UI
+repetitions, 0 MHz memory increase, and unchanged timings. Confirm
+`RollbackVerified=true` afterward. Do not interpret quick versus extended
+raw throughput numbers as a valid A/B comparison.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

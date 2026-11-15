@@ -81,6 +81,37 @@ If you already have third_party/ADLX, skip the clone and keep the pinned revisio
 
 The UI shows actual ADLX capabilities, raw driver limits and device name; candidates cannot be submitted.
 
+### Extended benchmarking profile (opt-in; recommended next validation)
+
+Existing short run measurements are just ~5–70 ms per workload and do not establish
+steady-state GPU clocks, performance gains or long-term stability. The optional
+`--extended-benchmark` flag enables a more demanding but **bounded** profile:
+2 GPU warmup passes per workload (untimed) and 16 measured passes for Compute,
+12 for Memory, and 16 for Mixed. Each pass is split into the same small,
+DX12-compliant dispatches; no single giant shader dispatch is introduced.
+Correctness still checks **every final output** using a CPU reference which
+accounts for warmup and measured passes. Intermediate GPU states are not
+individually verified; no ECC error counters are claimed. This can take
+substantially longer, especially due to CPU oracle checking.
+
+**Start with an extended read-only hardware check first:**
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --extended-benchmark
+    ./scripts/hardware-doctor.ps1
+
+Only after it passes, consider another **single** -15 mV hardware experiment
+with 3 UI repetitions, not a sweep. Run the server with:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --enable-hardware-writes --extended-benchmark
+
+The extended profile improves warmup and per-measurement GPU work, but it is not
+a multi-minute stress test. Measured times are CPU-submitted dispatch + transfer
+times, not isolated GPU timestamp-query results; no sustained GPU telemetry is
+currently recorded. Compare reports **within the same benchmark profile**, not
+against quick-profile scores, which use different timing boundaries.
+Stop on correctness errors, driver resets, unverified rollback, or abnormal
+temperatures; verify original settings in Adrenalin after any write test.
+
 ### 3B. Read-only GPU correctness diagnostic
 
 Before any tuning write, validate the actual DirectX 12 compute workloads at

@@ -30,6 +30,10 @@ Only proceed after verifying Gate 0. Stop other tuning tools (Adrenalin's manual
 4. Independently confirm original values in AMD Adrenalin after the test. Check the JSON audit in %LOCALAPPDATA%/AmdTune/reports.
 5. Use a separate monitoring tool to compare GPU clocks, hotspot and board power.
 
+## Optional memory-sweep investigation
+
+Only AFTER the initial -15 mV test, rollback, and recovery fault-injection have passed, return to stock voltage, choose **Preview conservative VRAM sweep**, and review the +25/+50/+75 MHz candidates. These are small hardware overclocks, not risk-free. The app must restore stock after each candidate and report performance changes, noise and correctness; a performance knee must **never** be called proven ECC activity. Do not combine a VRAM sweep with a core undervolt in the first hardware session.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

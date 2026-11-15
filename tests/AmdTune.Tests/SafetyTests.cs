@@ -103,4 +103,19 @@ public class SafetyTests
         Assert.Throws<SafetyException>(() =>
             CandidatePlanner.ConservativeVoltageSweep(missing, gpu.Current));
     }
+
+    [Fact]
+    public async Task Memory_sweep_never_alters_core_voltage_or_timings()
+    {
+        var gpu = new SimulatedGpuDevice();
+        var caps = await gpu.DiscoverAsync(default);
+        var original = await gpu.ReadSettingsAsync(default);
+        var plan = CandidatePlanner.ConservativeMemorySweep(caps, original);
+        Assert.Equal(new[] { 2525, 2550, 2575 }, plan.Candidates.Select(x => x.MemoryClockMhz));
+        Assert.All(plan.Candidates, x =>
+        {
+            Assert.Equal(original.VoltageOffsetMv, x.VoltageOffsetMv);
+            Assert.Equal(original.MemoryTiming, x.MemoryTiming);
+        });
+    }
 }

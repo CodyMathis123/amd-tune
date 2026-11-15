@@ -80,6 +80,16 @@ app.MapGet("/api/info", () => new
         : "SIMULATION ONLY. No actual GPU is queried or changed."
 });
 app.MapGet("/api/discover", async (IGpuDevice d, CancellationToken ct) => await d.DiscoverAsync(ct));
+app.MapGet("/api/plan/memory", async (IGpuDevice d, CancellationToken ct) =>
+{
+    try
+    {
+        var caps = await d.DiscoverAsync(ct);
+        var original = await d.ReadSettingsAsync(ct);
+        return Results.Ok(CandidatePlanner.ConservativeMemorySweep(caps, original));
+    }
+    catch (SafetyException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
 app.MapGet("/api/settings", async (IGpuDevice d, CancellationToken ct) => await d.ReadSettingsAsync(ct));
 app.MapGet("/api/telemetry", async (IGpuDevice d, CancellationToken ct) => await d.ReadTelemetryAsync(ct));
 app.MapGet("/api/plan", async (IGpuDevice d, CancellationToken ct) =>

@@ -52,6 +52,7 @@ async function refreshState() {
     const status = await request('/api/experiment');
     $('start').disabled = !canWrite || status.running || !settings;
     $('sweep').disabled = !canWrite || status.running || !settings;
+    $('memorySweep').disabled = !canWrite || status.running || !settings;
     $('cancel').disabled = !status.running;
     if (status.progress) {
       value('phase', status.progress.phase + ': ' + status.progress.message);
@@ -100,6 +101,15 @@ $('sweep').addEventListener('click', async () => {
       plannedCandidates.map(x => x.voltageOffsetMv + ' mV / ' + x.memoryClockMhz + ' MHz').join('\n'));
     value('formerror', '');
   } catch(e) { value('formerror', e.message); }
+});
+$('memorySweep').addEventListener('click', async () => {
+  try {
+    const plan = await request('/api/plan/memory');
+    plannedCandidates = plan.candidates;
+    value('sweepPreview', 'Conservative VRAM preview (original core voltage and timings):\n' +
+      plannedCandidates.map(x => x.voltageOffsetMv + ' mV / ' + x.memoryClockMhz + ' MHz').join('\n'));
+    value('formerror', '');
+  } catch (e) { value('formerror', e.message); }
 });
 $('start').addEventListener('click', async () => {
   try {

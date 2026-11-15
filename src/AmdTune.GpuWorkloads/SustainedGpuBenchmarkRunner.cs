@@ -78,6 +78,9 @@ public sealed class SustainedGpuBenchmarkRunner(IGpuDevice device) : IWorkloadRu
 
         // Capture only the timed dispatch/readback phase, excluding adapter
         // discovery, CPU reference setup, buffer creation, warmup and CPU oracle.
+        // Allocate the managed destination outside the measured window.
+        // Large (up to 128MiB) CPU allocation can otherwise distort throughput.
+        var resultData = new int[count];
         var hostWindowStart = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         int measuredPasses = 0;
@@ -93,7 +96,6 @@ public sealed class SustainedGpuBenchmarkRunner(IGpuDevice device) : IWorkloadRu
             DispatchPass();
             measuredPasses = 1;
         }
-        var resultData = new int[count];
         data.CopyTo(resultData);
         errors.CopyTo(sticky);
         stopwatch.Stop();

@@ -48,7 +48,7 @@ jobs:
       - name: Publish local UI
         run: dotnet publish src/AmdTune.Web/AmdTune.Web.csproj -c Release -r win-x64 --self-contained false -o artifacts/web
       - name: Publish independent recovery guard
-        run: dotnet publish src/AmdTune.Recovery/AmdTune.Recovery.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o artifacts/recovery
+        run: dotnet publish src/AmdTune.Recovery/AmdTune.Recovery.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o artifacts/recovery
       - name: Assert standalone recovery executable starts without managed sidecars
         shell: pwsh
         run: |

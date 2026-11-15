@@ -37,8 +37,7 @@ builder.Services.AddSingleton<IAuditStore>(_ => new JsonAuditStore(Path.Combine(
 builder.Services.AddSingleton(new TunePolicy(new SafetyEnvelope()));
 builder.Services.AddSingleton<TuningEngine>();
 builder.Services.AddSingleton(sp =>
-    new ExperimentManager(sp.GetRequiredService<IGpuDevice>(),
-        sp.GetRequiredService<TuningEngine>(), !hardware || writeRequested));
+    new ExperimentManager(sp.GetRequiredService<TuningEngine>(), !hardware || writeRequested));
 
 var app = builder.Build();
 const string origin = "http://127.0.0.1:5783";

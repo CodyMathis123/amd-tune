@@ -5,7 +5,7 @@ namespace AmdTune.Web;
 public sealed record ExperimentSnapshot(bool Running, RunProgress? Progress, RunReport? Report, string? LastError);
 
 /// <summary>One explicitly started experiment at a time; never auto-runs on startup.</summary>
-public sealed class ExperimentManager(IGpuDevice device, TuningEngine engine, bool canWrite)
+public sealed class ExperimentManager(TuningEngine engine, bool canWrite)
 {
     private readonly object _gate = new();
     private CancellationTokenSource? _cancel;

@@ -2,7 +2,7 @@ name: Build and verify
 
 on:
   push:
-    branches: [Production, 'feature/**']
+    branches: [Production]
   pull_request:
     branches: [Production]
   workflow_dispatch:

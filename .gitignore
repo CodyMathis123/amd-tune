@@ -12,3 +12,6 @@ artifacts/
 **/*.ready
 **/*.done
 **/*.tmp
+
+# AMD ADLX SDK is a separate upstream checkout with its own license.
+third_party/

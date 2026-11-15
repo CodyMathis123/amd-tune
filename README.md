@@ -46,11 +46,12 @@ Open http://127.0.0.1:5783. The title and results clearly state SIMULATION. Use 
 Clone or download the AMD SDK under your own SDK license, then run a Visual Studio Developer PowerShell:
 
     git clone https://github.com/GPUOpen-LibrariesAndSDKs/ADLX.git third_party/ADLX
+    git -C third_party/ADLX checkout --detach 32b5a740d42295c5dfe9026b9f52683da0f3af91
     ./scripts/build-native.ps1 -AdlxSdkDirectory ./third_party/ADLX
     ./scripts/publish-windows.ps1
     ./scripts/hardware-doctor.ps1
 
-These commands build the bridge from source, publish the UI and separate recovery executable in the same folder, and run **read-only** hardware diagnostics. Do not trust a random downloaded bridge .exe.
+These commands build the bridge from a pinned AMD ADLX revision (32b5a740d422), publish the UI and separate recovery executable in the same folder, and run **read-only** hardware diagnostics. Do not trust a random downloaded bridge .exe.
 
 ### 3. Hardware discovery, without enabling writes
 

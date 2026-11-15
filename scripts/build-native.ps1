@@ -8,6 +8,11 @@ param(
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $sdk = (Resolve-Path $AdlxSdkDirectory).Path
+$expectedSdkRevision = "32b5a740d42295c5dfe9026b9f52683da0f3af91"
+$actualSdkRevision = (& git -C $sdk rev-parse HEAD 2>$null)
+if ($LASTEXITCODE -ne 0 -or $actualSdkRevision.Trim() -ne $expectedSdkRevision) {
+  throw "AMD ADLX SDK revision mismatch. Run: git -C $sdk checkout --detach $expectedSdkRevision"
+}
 $helper = Join-Path $sdk "SDK/ADLXHelper/Windows/Cpp/ADLXHelper.cpp"
 $platform = Join-Path $sdk "SDK/Platform/Windows/WinAPIs.cpp"
 $header = Join-Path $sdk "SDK/Include/IGPUTuning.h"

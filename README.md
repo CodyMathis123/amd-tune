@@ -27,7 +27,7 @@ This is an experimental, transparent C#/.NET 10 system for discovery, real GPU c
 ### Prerequisites
 
 - Windows 11, AMD Radeon driver supporting ADLX 2.0, Microsoft .NET 10 SDK.
-- To build AMD native adapter: Visual Studio 2026 C++ Desktop Build Tools and official [AMD ADLX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/ADLX). The AMD SDK has its own license; it is not vendored here.
+- To build the AMD native adapter: Visual Studio (2022 or newer) or Build Tools with **Desktop development with C++**, the MSVC x64 toolset, a Windows SDK, and the official [AMD ADLX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/ADLX). The AMD SDK has its own license; it is not vendored here.
 - For web-only simulator, Windows or a .NET 10 platform; no AMD driver or GPU needed.
 - Do **not** run as administrator by default. AMD driver access may require OS permissions; check read-only discovery first.
 
@@ -43,7 +43,7 @@ Open http://127.0.0.1:5783. The title and results clearly state SIMULATION. Use 
 
 ### 2. Build official native ADLX bridge
 
-Clone or download the AMD SDK under your own SDK license, then run a Visual Studio Developer PowerShell:
+Clone or download the AMD SDK under your own SDK license. You can run from **ordinary PowerShell** or Visual Studio Developer PowerShell. The native build script uses Microsoft's vswhere and Developer PowerShell launcher to initialize MSVC x64 if installed:
 
     git clone https://github.com/GPUOpen-LibrariesAndSDKs/ADLX.git third_party/ADLX
     git -C third_party/ADLX checkout --detach 32b5a740d42295c5dfe9026b9f52683da0f3af91
@@ -51,7 +51,14 @@ Clone or download the AMD SDK under your own SDK license, then run a Visual Stud
     ./scripts/publish-windows.ps1
     ./scripts/hardware-doctor.ps1
 
-These commands build the bridge from a pinned AMD ADLX revision (32b5a740d422), publish the UI and separate recovery executable in the same folder, and run **read-only** hardware diagnostics. Do not trust a random downloaded bridge .exe.
+If you already have third_party/ADLX, skip the clone and keep the pinned revision. The compiler must come from the Visual Studio C++ workload; installing .NET alone is not enough. These commands build the bridge from a pinned AMD ADLX revision (32b5a740d422), publish the UI and separate recovery executable in the same folder, and run **read-only** hardware diagnostics. Do not trust a random downloaded bridge .exe.
+
+#### Troubleshooting native compilation
+
+- `cl.exe not found` means the MSVC x64 build environment is not available. The build script now finds installed MSVC via vswhere and initializes the developer shell automatically. If it still cannot find the compiler, open Visual Studio Installer, choose Modify, and install **Desktop development with C++** (MSVC x64 and Windows SDK).
+- If your shell blocks trusted local scripts, prefer a temporary process-scoped execution-policy change rather than modifying the machine-wide policy.
+- A `git clone` error indicating the ADLX directory already exists is harmless if you have checked out the pinned revision; skip the clone.
+- Running publish-windows.ps1 before the native bridge exists builds only the simulation-capable app. Once build-native.ps1 succeeds, **rerun publish-windows.ps1** so the bridge is copied into artifacts/app, then rerun hardware-doctor.ps1.
 
 ### 3. Hardware discovery, without enabling writes
 

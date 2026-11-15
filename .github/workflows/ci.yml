@@ -93,6 +93,7 @@ jobs:
     needs: [tests, publish-smoke, native-build]
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Download managed application and recovery outputs
         uses: actions/download-artifact@v4
         with:

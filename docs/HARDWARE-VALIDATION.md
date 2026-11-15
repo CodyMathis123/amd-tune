@@ -217,6 +217,19 @@ The operator initially attempted to extract the current native bridge into a dir
 
 Expected: `GPU_SOAK_PASS`, zero mismatches, unchanged driver settings, a new audit under `%LOCALAPPDATA%/AmdTune/soaks`. It runs repeated ~750ms host-timed GPU work with CPU verification breaks and is **not** 60 seconds of uninterrupted graphics load. Before meaningful stock-vs-overclock experiments, save the custom profile and restore factory defaults manually in Adrenalin, verify readback, then perform independently comparable runs. No write-enabled sweep, auto-tuning or fault injection yet.
 
+## Read-only 60-second sustained correctness soak: PASS (November 15, 2026)
+
+Operator-supplied audit ID `af209055-a5b3-469d-91fa-f179bd739238`, actual RX 9070 XT, `Simulated=false`; started 22:39:48.589 UTC and finished 22:40:49.874 UTC (61.284 seconds wall time). `Completed=true`, `Error=null`. **No tuning writes**: initial and final settings were exactly `-50 mV / 2700 MHz VRAM / Fast Timing`, which is **a custom profile, not factory stock**.
+
+- 20 Compute, 20 Memory, 20 Mixed measurements, all 60 `ExecutedOnGpu=true`, `Correct=true`, `Mismatches=0`.
+- 46.457 total seconds of host-timed dispatch+readback windows within 61.284 wall seconds. This is repeated correctness validation **with CPU checking between windows**, not 60 seconds of uninterrupted GPU work.
+- Sample mean synthetic throughput in billions of processed elements/s: Compute **9.747** (CV **1.71%**); Memory **10.963** (CV **4.58%**); Mixed **11.725** (CV **4.77%**). These are not GPU-only elapsed times, memory bandwidth, game frame rates, or performance-per-watt.
+- First 10 vs final 10 mean score changes: Compute **-1.01%**; Memory **+4.05%**; Mixed **+5.81%**. Although all CVs are under the preliminary 5% threshold, this temporal trend is compatible with warmup, caching, GPU state changes or scheduling effects. No causal explanation has yet been established.
+- The audit contains **81** asynchronous ADLX samples, including **69** meeting the provisional `GPUUsage >= 50%` and positive GPU clock criterion. **Zero of 60** individual measurements met `HasUsefulLoadEvidence` (minimum 3 active samples each); do not use the incidental readings to calculate energy efficiency or to approve tuning. Highest sampled hotspot was **26 °C**; this short/light synthetic workload does not demonstrate a hot-state thermal limit.
+- No OS crash, sensor-stop failure, unexpected tuning state change, or GPU correctness mismatch is recorded **in this session**. This does not establish general stability at -50mV/2700MHz/Fast timings, nor independently test killed-process rollback while an active candidate tune was applied.
+
+**Next instrumentation targets:** retain clean no-write correctness soak as a regression gate; sample sensor metrics persistently with less process startup overhead and trustworthy timestamps; incorporate GPU command-queue timestamp queries; warm up and separately compare cold/warm sessions; extend heavy-load testing to hot steady-state with active thermal guards; and require at least two independent stock reference sessions before any performance-based recommendation. Automatic changes and persistent profiles remain disabled.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

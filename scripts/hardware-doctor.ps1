@@ -35,5 +35,13 @@ if (-not $usageSchema) {
 } elseif ($null -eq $telemetry.utilizationPercent) {
   Write-Warning "GPU utilization metric is unavailable from ADLX; active-load power/efficiency must remain unverified."
 }
+# A telemetry JSON schema is not evidence the native binary supports the new
+# persistent-stream command. Detect this capability independently.
+$streamCapabilities = & $bridge telemetry-stream-capabilities 2>$null
+if ($LASTEXITCODE -eq 0) {
+  Write-Host "Native read-only ADLX telemetry streaming: $streamCapabilities"
+} else {
+  Write-Warning "This native ADLX bridge does not support telemetry-stream; fetch the new amd-adlx-bridge-unsigned-dev artifact from the latest successful CI run. Do not run the sustained verification with an old bridge."
+}
 Write-Host "Read-only checks do not establish factory-default tuning. Compare these current driver settings with your intended baseline before any performance experiment."
 Write-Host "Do not enable writes until driver ranges, GPU identity and guard are verified."

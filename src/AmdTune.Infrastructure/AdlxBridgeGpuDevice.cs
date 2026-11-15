@@ -6,7 +6,7 @@ namespace AmdTune.Infrastructure;
 /// Windows ADLX access is deliberately limited to a separately built, auditable C++ helper.
 /// No third-party binary is downloaded or executed.
 /// </summary>
-public sealed class AdlxBridgeGpuDevice(BridgeProcess bridge) : IGpuDevice
+public sealed class AdlxBridgeGpuDevice(BridgeProcess bridge) : IGpuDevice, IStreamingGpuTelemetryDevice
 {
     private sealed record WriteResult(bool Ok, string? Error);
 
@@ -18,6 +18,9 @@ public sealed class AdlxBridgeGpuDevice(BridgeProcess bridge) : IGpuDevice
 
     public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
         => bridge.InvokeAsync<GpuTelemetry>(ct, "telemetry");
+
+    public IAsyncEnumerable<GpuTelemetry> StreamTelemetryAsync(TimeSpan interval, CancellationToken ct)
+        => bridge.StreamTelemetryAsync(interval, ct);
 
     public async Task ApplyAsync(TuningSettings settings, CancellationToken ct)
     {

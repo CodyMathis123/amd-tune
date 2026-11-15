@@ -196,4 +196,75 @@ public class BenchmarkEvidenceTests
         }
     }
 
+    [Fact]
+    public async Task Streaming_sampler_uses_one_native_session_instead_of_snapshot_processes()
+    {
+        var gpu = new FakeStreamingDevice(false);
+        using var work = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(gpu, 90, work);
+        sampler.Start();
+        await gpu.FiveSamples.WaitAsync(TimeSpan.FromSeconds(3));
+        var evidence = await sampler.StopAsync();
+        Assert.InRange(evidence.SampleCount, 5, 256);
+        Assert.InRange(evidence.ActiveSamples, 5, 256);
+        Assert.Equal(1, gpu.StreamStarts);
+        Assert.Equal(0, gpu.SnapshotRequests);
+        Assert.Equal(TimeSpan.FromMilliseconds(125), gpu.RequestedInterval);
+        Assert.False(work.IsCancellationRequested);
+        Assert.True(evidence.HasUsefulLoadEvidence);
+    }
+
+    [Fact]
+    public async Task Broken_native_telemetry_stream_fails_closed_and_cancels_workload()
+    {
+        var gpu = new FakeStreamingDevice(true);
+        using var work = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(gpu, 90, work);
+        sampler.Start();
+        for (var i = 0; i < 100 && !work.IsCancellationRequested; i++)
+            await Task.Delay(10);
+        Assert.True(work.IsCancellationRequested);
+        var ex = await Assert.ThrowsAsync<SafetyException>(() => sampler.StopAsync());
+        Assert.Contains("Injected native stream failure", ex.Message);
+        Assert.Equal(0, gpu.SnapshotRequests);
+    }
+
+    private sealed class FakeStreamingDevice(bool fail) : IGpuDevice, IStreamingGpuTelemetryDevice
+    {
+        private readonly SimulatedGpuDevice _simulation = new();
+        private readonly TaskCompletionSource<bool> _five =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task FiveSamples => _five.Task;
+        public int SnapshotRequests { get; private set; }
+        public int StreamStarts { get; private set; }
+        public TimeSpan RequestedInterval { get; private set; }
+        public Task<DeviceCapabilities> DiscoverAsync(CancellationToken ct)
+            => _simulation.DiscoverAsync(ct);
+        public Task<TuningSettings> ReadSettingsAsync(CancellationToken ct)
+            => _simulation.ReadSettingsAsync(ct);
+        public Task ApplyAsync(TuningSettings settings, CancellationToken ct)
+            => throw new SafetyException("Streaming fake must never write GPU settings.");
+        public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
+        {
+            SnapshotRequests++;
+            return Task.FromException<GpuTelemetry>(
+                new HardwareException("Per-reading snapshot path should not be used."));
+        }
+        public async IAsyncEnumerable<GpuTelemetry> StreamTelemetryAsync(
+            TimeSpan interval,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            StreamStarts++;
+            RequestedInterval = interval;
+            for (var i = 0; !ct.IsCancellationRequested; i++)
+            {
+                if (fail && i == 2)
+                    throw new HardwareException("Injected native stream failure");
+                if (i >= 4) _five.TrySetResult(true);
+                yield return new GpuTelemetry(DateTimeOffset.UtcNow, 42, 185, 2200, 1800, 95);
+                await Task.Delay(5, ct);
+            }
+        }
+    }
+
 }

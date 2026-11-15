@@ -81,6 +81,43 @@ If you already have third_party/ADLX, skip the clone and keep the pinned revisio
 
 The UI shows actual ADLX capabilities, raw driver limits and device name; candidates cannot be submitted.
 
+## Native read-only telemetry streaming (workload instrumentation iteration)
+
+The 60-second soak recorded only **81 ADLX samples over 60 measurements**.
+The original monitoring implementation started a separate native C++ process
+for *each* sample. A fresh read-only `telemetry-stream <interval-ms>` command
+now keeps AMD ADLX initialized inside **one helper process per workload** and
+emits timestamped JSON lines (NDJSON), normally sampled at 125 ms intervals.
+The helper is explicitly read-only; GPU settings writes use the existing
+separate `apply` command. The previous per-reading path remains available
+to `hardware-doctor.ps1` and simulation tests.
+
+The managed sampler automatically chooses the native stream when available;
+it validates every reading against the live hotspot guard, captures bounded
+raw telemetry and treats a broken or silent stream as a safety failure.
+Stopping a workload cancels the helper, without producing a spurious failure.
+The native process has an 8-second no-data timeout and must terminate when
+the managed sampler is disposed. Hardware stability, sampling cadence and
+accuracy remain **unverified on the physical GPU** until the next read-only
+test; sampling may still include periods before and after GPU execution.
+
+To avoid `gh run download` extraction conflicts when the target file exists,
+there is a dedicated helper that fetches the verified CI artifact into a
+temporary empty folder, checks its protocol, and copies only the trusted
+executable into `artifacts/native`:
+
+    git pull --ff-only
+    ./scripts/update-native-bridge.ps1 -RunId <successful-CI-run-ID>
+    ./scripts/publish-windows.ps1
+    ./scripts/hardware-doctor.ps1
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark
+
+The doctor now reports `Native read-only ADLX telemetry streaming` separately
+from the existing `utilizationPercent` field. If stream support is missing,
+update the native helper before launching the new read-only validation. Stop
+on a sensor failure or incorrect GPU output. No hardware tuning writes,
+background auto-tuning or production release are enabled.
+
 ### Sustained host-timed profiling and separate stability evidence
 
 The new opt-in `--sustained-benchmark` profile targets at least 750 ms

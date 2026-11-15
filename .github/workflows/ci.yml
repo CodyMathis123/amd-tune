@@ -81,6 +81,15 @@ jobs:
       - name: Build bridge in normal PowerShell (auto-detect MSVC)
         shell: pwsh
         run: ./scripts/build-native.ps1 -AdlxSdkDirectory third_party/ADLX
+      - name: Validate compiled native telemetry-stream protocol without an AMD GPU
+        shell: pwsh
+        run: |
+          $protocol = & artifacts/native/AmdTune.AdlxBridge.exe telemetry-stream-capabilities | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or !$protocol.supported -or
+              $protocol.minIntervalMs -ne 100 -or $protocol.maxIntervalMs -ne 1000) {
+            throw "The compiled ADLX bridge does not support bounded read-only telemetry streaming."
+          }
+          Write-Host "NATIVE_TELEMETRY_STREAM_PROTOCOL_OK"
       - uses: actions/upload-artifact@v4
         with:
           name: amd-adlx-bridge-unsigned-dev

@@ -46,6 +46,12 @@ static void Write(IADLXManualGraphicsTuning2Ptr& g, IADLXManualVRAMTuning2Ptr& v
 }
 static int Execute(int argc,char** argv) {
     if (argc < 2) throw std::invalid_argument("Expected discover/read/telemetry/apply.");
+    // Pure protocol discovery intentionally needs neither a GPU nor ADLX initialization,
+    // allowing Windows CI to verify the compiled helper's stream support.
+    if (argc==2 && std::string(argv[1])=="telemetry-stream-capabilities") {
+        std::cout<<"{\"supported\":true,\"minIntervalMs\":100,\"maxIntervalMs\":1000}"<<std::endl;
+        return 0;
+    }
     ADLXHelper helper;
     if (ADLX_FAILED(helper.Initialize())) throw std::runtime_error("ADLX initialize failed.");
     auto system = helper.GetSystemServices();
@@ -98,27 +104,40 @@ static int Execute(int argc,char** argv) {
         const Settings s=Read(gfx,vram,timingSupported);
         std::cout << "{\"voltageOffsetMv\":"<<s.uv<<",\"memoryClockMhz\":"<<s.memory
                   <<",\"memoryTiming\":"<<(s.timing==MEMORYTIMING_FAST_TIMING?1:0)<<"}"<<std::endl;
-    } else if (cmd=="telemetry" && argc==2) {
+    } else if ((cmd=="telemetry" && argc==2) || (cmd=="telemetry-stream" && argc==3)) {
+        // A read-only, long-lived ADLX stream avoids launching and reinitializing
+        // the helper for every sample. It has no driver tuning write commands.
+        const bool streaming = cmd=="telemetry-stream";
+        int intervalMs=0;
+        if (streaming) {
+            intervalMs=std::stoi(argv[2]);
+            if (intervalMs<100 || intervalMs>1000)
+                throw std::invalid_argument("telemetry-stream interval must be 100-1000ms.");
+        }
         IADLXPerformanceMonitoringServicesPtr monitor;
         if (ADLX_FAILED(system->GetPerformanceMonitoringServices(&monitor)) || monitor==nullptr)
             throw std::runtime_error("Monitoring service unavailable.");
-        IADLXGPUMetricsPtr sample;
-        if (ADLX_FAILED(monitor->GetCurrentGPUMetrics(gpu,&sample)) || sample==nullptr)
-            throw std::runtime_error("Cannot sample GPU telemetry.");
-        adlx_double hotspot=0,power=0; adlx_int core=0,memory=0;
-        if (ADLX_FAILED(sample->GPUHotspotTemperature(&hotspot)) || hotspot<=0 ||
-            ADLX_FAILED(sample->GPUTotalBoardPower(&power)) ||
-            ADLX_FAILED(sample->GPUClockSpeed(&core)) ||
-            ADLX_FAILED(sample->GPUVRAMClockSpeed(&memory)))
-            throw std::runtime_error("Required live GPU metrics unavailable.");
-        adlx_double usage=0;
-        const bool hasUsage=ADLX_SUCCEEDED(sample->GPUUsage(&usage)) && usage>=0 && usage<=100;
-        std::cout<<"{\"at\":\""<<IsoUtc()<<"\",\"hotspotC\":"<<hotspot<<",\"boardPowerW\":"
-                 <<power<<",\"coreClockMhz\":"<<core<<",\"memoryClockMhz\":"<<memory
-                 <<",\"utilizationPercent\":";
-        if (hasUsage) std::cout<<usage;
-        else std::cout<<"null";
-        std::cout<<"}"<<std::endl;
+        do {
+            IADLXGPUMetricsPtr sample;
+            if (ADLX_FAILED(monitor->GetCurrentGPUMetrics(gpu,&sample)) || sample==nullptr)
+                throw std::runtime_error("Cannot sample GPU telemetry.");
+            adlx_double hotspot=0,power=0; adlx_int core=0,memory=0;
+            if (ADLX_FAILED(sample->GPUHotspotTemperature(&hotspot)) || hotspot<=0 ||
+                ADLX_FAILED(sample->GPUTotalBoardPower(&power)) ||
+                ADLX_FAILED(sample->GPUClockSpeed(&core)) ||
+                ADLX_FAILED(sample->GPUVRAMClockSpeed(&memory)))
+                throw std::runtime_error("Required live GPU metrics unavailable.");
+            adlx_double usage=0;
+            const bool hasUsage=ADLX_SUCCEEDED(sample->GPUUsage(&usage)) && usage>=0 && usage<=100;
+            std::cout<<"{\"at\":\""<<IsoUtc()<<"\",\"hotspotC\":"<<hotspot<<",\"boardPowerW\":"
+                     <<power<<",\"coreClockMhz\":"<<core<<",\"memoryClockMhz\":"<<memory
+                     <<",\"utilizationPercent\":";
+            if (hasUsage) std::cout<<usage;
+            else std::cout<<"null";
+            // std::endl flushes *each* NDJSON sample for immediate ingestion.
+            std::cout<<"}"<<std::endl;
+            if (streaming) Sleep(static_cast<DWORD>(intervalMs));
+        } while (streaming);
     } else if (cmd=="apply" && argc==5) {
         if (!ranges) throw std::runtime_error("Driver limits unknown; refusing write.");
         const int uv=std::stoi(argv[2]), clock=std::stoi(argv[3]);

@@ -14,7 +14,12 @@ public sealed class WorkloadTelemetrySampler(
     CancellationTokenSource workloadCancellation,
     TimeSpan? sampleInterval = null) : IAsyncDisposable
 {
-    private readonly TimeSpan _interval = sampleInterval ?? TimeSpan.FromMilliseconds(250);
+    // The native stream avoids expensive per-reading process startup, so
+    // use a faster cadence only when that streaming path is supported.
+    private readonly TimeSpan _interval = sampleInterval ??
+        (device is IStreamingGpuTelemetryDevice
+            ? TimeSpan.FromMilliseconds(125)
+            : TimeSpan.FromMilliseconds(250));
     private readonly CancellationTokenSource _stop = CancellationTokenSource.CreateLinkedTokenSource(workloadCancellation.Token);
     private readonly List<GpuTelemetry> _samples = [];
     private Task? _worker;
@@ -33,12 +38,23 @@ public sealed class WorkloadTelemetrySampler(
     {
         try
         {
-            while (!_stop.IsCancellationRequested)
+            if (device is IStreamingGpuTelemetryDevice streaming)
             {
-                var reading = await device.ReadTelemetryAsync(_stop.Token);
-                TunePolicy.RequireTelemetry(reading, hotspotLimitC);
-                if (_samples.Count < 256) _samples.Add(reading);
-                await Task.Delay(_interval, _stop.Token);
+                await foreach (var reading in streaming.StreamTelemetryAsync(_interval, _stop.Token))
+                    ValidateAndStore(reading);
+                // Unexpected clean EOF while sampling is an unsafe loss
+                // of live thermal protection; caller-stop is handled below.
+                if (!_stop.IsCancellationRequested)
+                    throw new HardwareException("Native telemetry stream ended unexpectedly.");
+            }
+            else
+            {
+                while (!_stop.IsCancellationRequested)
+                {
+                    var reading = await device.ReadTelemetryAsync(_stop.Token);
+                    ValidateAndStore(reading);
+                    await Task.Delay(_interval, _stop.Token);
+                }
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
@@ -50,6 +66,12 @@ public sealed class WorkloadTelemetrySampler(
             try { workloadCancellation.Cancel(); }
             catch (ObjectDisposedException) { }
         }
+    }
+
+    private void ValidateAndStore(GpuTelemetry reading)
+    {
+        TunePolicy.RequireTelemetry(reading, hotspotLimitC);
+        if (_samples.Count < 256) _samples.Add(reading);
     }
 
     public async Task<WorkloadTelemetryEvidence> StopAsync()

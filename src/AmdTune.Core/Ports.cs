@@ -27,6 +27,16 @@ public interface IWorkloadTelemetryRecorder
         CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Optional read-only long-lived native monitoring stream. Does not change GPU tuning.
+/// Implementations must surface telemetry errors and obey cancellation.
+/// </summary>
+public interface IStreamingGpuTelemetryDevice
+{
+    IAsyncEnumerable<GpuTelemetry> StreamTelemetryAsync(
+        TimeSpan interval, CancellationToken cancellationToken);
+}
+
 /// <summary>Untrusted workloads are never allowed to persist a tune.</summary>
 public interface IAuditStore
 {

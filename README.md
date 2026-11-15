@@ -11,11 +11,12 @@ This is an experimental, transparent C#/.NET 10 system for discovery, real GPU c
 | Loopback-only browser dashboard and JSON API | Implemented |
 | Read-only GPU capabilities / tuning settings / telemetry discovery | AMD ADLX bridge; requires Windows, AMD drivers, locally built bridge |
 | Explicit nonpersistent voltage/VRAM experiment | Implemented with conservative policy; **hardware validation pending** |
+| Capability-aware guided voltage sweep | Implemented; generates conservative, driver-range-valid candidates and restores after each trial |
 | DirectX 12 integer correctness workload | ComputeSharp 3.2.0; checks every output element against CPU oracle; hardware validation pending |
 | Simulation and dependency-injected mocks | Implemented |
 | Independent process recovery after host crash | Implemented; **must fault-inject and validate on Windows hardware** |
 | Rollback after success, failure, cancellation | Implemented; driver readback verified |
-| JSON audit records | Implemented at LocalAppData/AmdTune/reports |
+| JSON audit records plus crash-survivable JSONL event journal | Implemented at LocalAppData/AmdTune/reports |
 | Long-running gaming stability prediction | **Not claimed**; out of scope until validated |
 | Actual ECC error detection | **Not supported** without trustworthy exposed counters |
 | Auto-apply at Windows startup | **Deliberately absent** |
@@ -38,7 +39,7 @@ From the repo root:
     dotnet test tests/AmdTune.Tests/AmdTune.Tests.csproj -c Release
     dotnet run --project src/AmdTune.Web/AmdTune.Web.csproj
 
-Open http://127.0.0.1:5783. The title and results clearly state SIMULATION.
+Open http://127.0.0.1:5783. The title and results clearly state SIMULATION. Use **Preview conservative voltage sweep** for a three-candidate guided plan, or enter one candidate manually. This does not activate hardware in simulation mode.
 
 ### 2. Build official native ADLX bridge
 
@@ -63,7 +64,7 @@ Read [docs/HARDWARE-VALIDATION.md](docs/HARDWARE-VALIDATION.md), stop other GPU-
 
     ./artifacts/app/AmdTune.Web.exe --hardware --enable-hardware-writes
 
-The initial trial should be **one small -15 mV voltage offset, no VRAM overclock, three repetitions**. Observe readback and rollback. Do not enable persistent tuning.
+The initial physical trial should be **one small -15 mV voltage offset, no VRAM overclock, three repetitions**. Only try the guided multi-candidate sweep after the single-candidate write and recovery gates pass. Observe readback and rollback. Do not enable persistent tuning.
 
 ### Architecture
 

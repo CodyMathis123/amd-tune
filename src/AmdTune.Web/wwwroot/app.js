@@ -1,6 +1,6 @@
 /* Strict local-only UI. All untrusted response fields are rendered via textContent. */
 const $ = id => document.getElementById(id);
-let securityToken = null, settings = null, capabilities = null, canWrite = false;
+let securityToken = null, settings = null, capabilities = null, canWrite = false, plannedCandidates = null;
 async function request(path, method = 'GET', body) {
   const options = { method, headers: {} };
   if (method !== 'GET') {
@@ -15,6 +15,8 @@ async function request(path, method = 'GET', body) {
 }
 function value(id, text) { $(id).textContent = text; }
 function updateCandidate() {
+  plannedCandidates = null;
+  value('sweepPreview', '');
   if (!settings || !capabilities) return;
   const volt = Number($('volt').value), vram = Number($('vram').value);
   value('candidate', 'Candidate: ' + (settings.voltageOffsetMv + volt) + ' mV / ' +
@@ -49,6 +51,7 @@ async function refreshState() {
   try {
     const status = await request('/api/experiment');
     $('start').disabled = !canWrite || status.running || !settings;
+    $('sweep').disabled = !canWrite || status.running || !settings;
     $('cancel').disabled = !status.running;
     if (status.progress) {
       value('phase', status.progress.phase + ': ' + status.progress.message);
@@ -89,6 +92,15 @@ async function init() {
 }
 $('volt').addEventListener('input', updateCandidate);
 $('vram').addEventListener('input', updateCandidate);
+$('sweep').addEventListener('click', async () => {
+  try {
+    const plan = await request('/api/plan');
+    plannedCandidates = plan.candidates;
+    value('sweepPreview', 'Candidate preview (will always restore stock):\n' +
+      plannedCandidates.map(x => x.voltageOffsetMv + ' mV / ' + x.memoryClockMhz + ' MHz').join('\n'));
+    value('formerror', '');
+  } catch(e) { value('formerror', e.message); }
+});
 $('start').addEventListener('click', async () => {
   try {
     value('formerror', '');
@@ -97,7 +109,7 @@ $('start').addEventListener('click', async () => {
     if (!Number.isInteger(voltageOffsetMv) || !Number.isInteger(memoryClockMhz))
       throw new Error('Only integer driver settings are supported.');
     await request('/api/experiment', 'POST', {
-      candidates: [{ voltageOffsetMv, memoryClockMhz, memoryTiming: settings.memoryTiming }],
+      candidates: plannedCandidates || [{ voltageOffsetMv, memoryClockMhz, memoryTiming: settings.memoryTiming }],
       repetitions: Number($('repetitions').value)
     });
     await refreshState();

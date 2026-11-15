@@ -81,4 +81,26 @@ public class SafetyTests
         Assert.Equal(2, stats.StandardDeviation, 8);
         Assert.Equal(0, MeasurementAnalysis.RelativeChangePercent(10, 11, 12), 8);
     }
+
+    [Fact]
+    public async Task Conservative_planner_respects_driver_granularity()
+    {
+        var gpu = new SimulatedGpuDevice();
+        var caps = await gpu.DiscoverAsync(default);
+        var baseline = await gpu.ReadSettingsAsync(default);
+        var plan = CandidatePlanner.ConservativeVoltageSweep(caps, baseline);
+        Assert.Equal(3, plan.Candidates.Count);
+        Assert.Equal(new[] { -15, -30, -45 }, plan.Candidates.Select(x => x.VoltageOffsetMv));
+        Assert.All(plan.Candidates, x => Assert.Equal(baseline.MemoryClockMhz, x.MemoryClockMhz));
+    }
+
+    [Fact]
+    public async Task Conservative_planner_fails_closed_without_read_support()
+    {
+        var gpu = new SimulatedGpuDevice();
+        var caps = await gpu.DiscoverAsync(default);
+        var missing = caps with { CanReadSettings = false };
+        Assert.Throws<SafetyException>(() =>
+            CandidatePlanner.ConservativeVoltageSweep(missing, gpu.Current));
+    }
 }

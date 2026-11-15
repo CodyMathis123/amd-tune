@@ -39,6 +39,9 @@
           <label>VRAM increase relative to current settings (MHz)<input id="vram" type="number" value="0" min="0" max="150" step="5"></label>
           <label>Validation repetitions<select id="repetitions"><option value="3">3 per workload</option><option value="5">5 per workload</option><option value="7">7 per workload</option></select></label>
           <p id="candidate" class="mono small"></p>
+          <p class="muted">Optional guided mode: generate a conservative 3-step undervolt sweep from actual driver ranges. No VRAM overclock in guided mode.</p>
+          <button id="sweep" class="secondary" disabled>Preview conservative voltage sweep</button>
+          <pre id="sweepPreview" class="mono"></pre>
           <div class="actions">
             <button id="start" disabled>Start non-persistent experiment</button>
             <button id="cancel" class="secondary" disabled>Cancel and restore</button>

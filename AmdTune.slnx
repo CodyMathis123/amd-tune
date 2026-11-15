@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="src/AmdTune.Core/AmdTune.Core.csproj" />
+  <Project Path="src/AmdTune.Infrastructure/AmdTune.Infrastructure.csproj" />
+  <Project Path="src/AmdTune.GpuWorkloads/AmdTune.GpuWorkloads.csproj" />
+  <Project Path="src/AmdTune.Recovery/AmdTune.Recovery.csproj" />
+  <Project Path="src/AmdTune.Web/AmdTune.Web.csproj" />
+  <Project Path="tests/AmdTune.Tests/AmdTune.Tests.csproj" />
+</Solution>

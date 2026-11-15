@@ -1,0 +1,55 @@
+name: Build and verify
+
+on:
+  push:
+    branches: [Production, 'feature/**']
+  pull_request:
+    branches: [Production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: .NET safety + simulation tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore AmdTune.slnx
+      - name: Build with warnings as errors
+        run: dotnet build AmdTune.slnx -c Release --no-restore
+      - name: Unit tests
+        run: dotnet test tests/AmdTune.Tests/AmdTune.Tests.csproj -c Release --no-build --logger "trx;LogFileName=safety-tests.trx"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: tests/AmdTune.Tests/TestResults
+          if-no-files-found: ignore
+
+  publish-smoke:
+    name: Windows app publish
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish local UI
+        run: dotnet publish src/AmdTune.Web/AmdTune.Web.csproj -c Release -r win-x64 --self-contained false -o artifacts/web
+      - name: Publish independent recovery guard
+        run: dotnet publish src/AmdTune.Recovery/AmdTune.Recovery.csproj -c Release -r win-x64 --self-contained false -o artifacts/recovery
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows-dev-build
+          path: |
+            artifacts/web
+            artifacts/recovery
+          retention-days: 7

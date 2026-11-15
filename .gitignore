@@ -1,0 +1,14 @@
+**/bin/
+**/obj/
+.vs/
+.vscode/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.pdb
+**/tuner_state.json
+**/*.recovery.log
+**/*.ready
+**/*.done
+**/*.tmp

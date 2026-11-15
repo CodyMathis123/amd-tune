@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AMD Tune · Evidence-led GPU experiments</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <div><span class="mark">◆</span><strong>AMD Tune</strong><span class="sub">GPU Research Studio</span></div>
+    <div id="mode" class="pill">Connecting…</div>
+  </header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">CONTROLLED GPU EXPERIMENTS</p>
+      <h1>Tune with evidence.<br><span>Leave no unstable profile behind.</span></h1>
+      <p>Read actual driver capabilities, test candidates, verify results, and return to your original settings. No invented GFLOPS or 99.9% stability promises.</p>
+      <div class="notice" id="notice">Loading runtime safety status…</div>
+    </section>
+    <div class="layout">
+      <div class="column">
+        <article>
+          <h2>Hardware discovery</h2>
+          <p class="muted">Capabilities must be read from the actual device before applying a tune.</p>
+          <div id="device" class="mono">Discovering…</div>
+          <div class="cards">
+            <div class="stat"><small>Hotspot</small><strong id="hotspot">—</strong></div>
+            <div class="stat"><small>Board power</small><strong id="power">—</strong></div>
+            <div class="stat"><small>Core clock</small><strong id="coreclock">—</strong></div>
+            <div class="stat"><small>Memory clock</small><strong id="memclock">—</strong></div>
+          </div>
+        </article>
+        <article>
+          <h2>Experiment plan</h2>
+          <p class="muted">Each candidate is tested, checked, and rolled back. Nothing is applied permanently.</p>
+          <label>Core voltage offset relative to current settings (mV)<input id="volt" type="number" value="-15" min="-75" max="0" step="1"></label>
+          <label>VRAM increase relative to current settings (MHz)<input id="vram" type="number" value="0" min="0" max="150" step="5"></label>
+          <label>Validation repetitions<select id="repetitions"><option value="3">3 per workload</option><option value="5">5 per workload</option><option value="7">7 per workload</option></select></label>
+          <p id="candidate" class="mono small"></p>
+          <div class="actions">
+            <button id="start" disabled>Start non-persistent experiment</button>
+            <button id="cancel" class="secondary" disabled>Cancel and restore</button>
+          </div>
+          <p id="formerror" class="error"></p>
+        </article>
+      </div>
+      <div class="column">
+        <article>
+          <h2>Experiment timeline</h2>
+          <div class="progress"><div id="bar"></div></div>
+          <div id="phase" class="mono">Idle. No workload is running.</div>
+          <h3>Latest report</h3>
+          <div id="report">No experiment completed.</div>
+          <div id="download"></div>
+        </article>
+        <article>
+          <h2>Safety guarantees & limitations</h2>
+          <ul>
+            <li>Default mode is fully simulated; no driver access.</li>
+            <li>Physical writes require explicit startup opt-in and a separate recovery executable.</li>
+            <li>All candidates undergo driver readback and telemetry checks.</li>
+            <li>Every experiment attempts rollback and verifies it, including cancellations.</li>
+            <li>An independent watchdog handles parent-process exits while Windows remains running.</li>
+            <li>Tests show only workload-specific evidence, not universal game stability.</li>
+          </ul>
+          <p class="muted">The report distinguishes simulated from real GPU execution, and retains trial inputs, measurements and errors.</p>
+        </article>
+      </div>
+    </div>
+    <footer>Local-only. No accounts, telemetry upload or automatic profile persistence. Source and build recipes are auditable.</footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

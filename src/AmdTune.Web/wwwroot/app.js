@@ -1,5 +1,9 @@
 /* Strict local-only UI. All untrusted response fields are rendered via textContent. */
 const $ = id => document.getElementById(id);
+const phaseNames = ['Idle','Discovering','Baseline','Applying','Verifying','Benchmarking','Rolling back','Completed','Failed','Cancelled'];
+const verdictNames = ['Accepted','Rejected','Inconclusive'];
+const workloadNames = ['Compute','Memory','Mixed'];
+const nameOf = (names, value) => typeof value === 'number' ? (names[value] || String(value)) : String(value);
 let securityToken = null, settings = null, capabilities = null, canWrite = false, plannedCandidates = null;
 async function request(path, method = 'GET', body) {
   const options = { method, headers: {} };
@@ -24,7 +28,7 @@ function updateCandidate() {
 }
 function displayReport(report) {
   const lines = [
-    'Outcome: ' + report.phase,
+    'Outcome: ' + nameOf(phaseNames, report.phase),
     'Backend: ' + report.backend + (report.simulated ? ' (SIMULATION)' : ' (REAL HARDWARE)'),
     'Rollback verified: ' + report.rollbackVerified,
     'Verdict: ' + report.verdict,
@@ -32,9 +36,9 @@ function displayReport(report) {
   ];
   for (const trial of report.trials) {
     lines.push('  ' + trial.settings.voltageOffsetMv + ' mV, ' + trial.settings.memoryClockMhz +
-      ' MHz: ' + trial.verdict + ' — ' + trial.reason);
+      ' MHz: ' + nameOf(verdictNames, trial.verdict) + ' — ' + trial.reason);
     if (trial.comparisons) for (const comparison of trial.comparisons) {
-      lines.push('    ' + comparison.kind + ': ' + comparison.percentChange.toFixed(2) + '% versus A/B/A reference; drift ' + comparison.referenceDriftPercent.toFixed(2) + '%');
+      lines.push('    ' + nameOf(workloadNames, comparison.kind) + ': ' + comparison.percentChange.toFixed(2) + '% versus A/B/A reference; drift ' + comparison.referenceDriftPercent.toFixed(2) + '%');
     }
   }
   if (report.error) lines.push('Error: ' + report.error);
@@ -55,7 +59,7 @@ async function refreshState() {
     $('memorySweep').disabled = !canWrite || status.running || !settings;
     $('cancel').disabled = !status.running;
     if (status.progress) {
-      value('phase', status.progress.phase + ': ' + status.progress.message);
+      value('phase', nameOf(phaseNames, status.progress.phase) + ': ' + status.progress.message);
       $('bar').style.width = Math.min(100, status.progress.completedTrials /
         Math.max(1, status.progress.totalTrials) * 100) + '%';
     }

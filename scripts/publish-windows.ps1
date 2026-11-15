@@ -8,11 +8,22 @@ try {
   dotnet publish src/AmdTune.Recovery/AmdTune.Recovery.csproj -c $Configuration -r win-x64 --self-contained false -o artifacts/recovery
   if ($LASTEXITCODE -ne 0) { throw "Recovery build failed." }
   Copy-Item artifacts/recovery/AmdTune.Recovery.exe artifacts/app/ -Force
-  if (Test-Path artifacts/native/AmdTune.AdlxBridge.exe) {
-    Copy-Item artifacts/native/AmdTune.AdlxBridge.exe artifacts/app/ -Force
+  $sourceBridge = "artifacts/native/AmdTune.AdlxBridge.exe"
+  $appBridge = "artifacts/app/AmdTune.AdlxBridge.exe"
+  if (Test-Path $sourceBridge) {
+    Copy-Item $sourceBridge $appBridge -Force
+    Write-Host "Native ADLX bridge copied from local build."
+  } elseif (Test-Path $appBridge) {
+    Write-Host "Using existing native ADLX bridge from application directory (no local C++ build required)."
   } else {
-    Write-Warning "Native ADLX bridge not built. Simulation mode works; hardware mode fails closed."
+    Write-Warning "Native ADLX bridge missing. Simulation mode works; hardware mode fails closed."
   }
+  foreach ($asset in @("wwwroot/index.html", "wwwroot/app.js", "wwwroot/styles.css")) {
+    if (!(Test-Path (Join-Path "artifacts/app" $asset))) {
+      throw "Published UI asset missing: $asset. Refusing to present an incomplete app as ready."
+    }
+  }
+  Write-Host "Published web assets verified (index.html, app.js, styles.css)."
   Write-Host "Simulation: artifacts/app/AmdTune.Web.exe"
   Write-Host "Hardware discovery: artifacts/app/AmdTune.Web.exe --hardware"
   Write-Host "Physical writes (only after hardware checklist): artifacts/app/AmdTune.Web.exe --hardware --enable-hardware-writes"

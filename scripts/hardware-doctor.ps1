@@ -10,6 +10,12 @@ Write-Host "OS: $([System.Environment]::OSVersion.VersionString)"
 Write-Host "App: $dir"
 Write-Host "Native ADLX bridge: $(Test-Path $bridge)"
 Write-Host "Separate recovery executable: $(Test-Path $guard)"
+$uiAssets = @("wwwroot/index.html", "wwwroot/app.js", "wwwroot/styles.css")
+$missingAssets = @($uiAssets | Where-Object { !(Test-Path (Join-Path $dir $_)) })
+Write-Host "Published UI assets complete: $($missingAssets.Count -eq 0)"
+if ($missingAssets.Count -gt 0) {
+  Write-Warning ("Web dashboard may return HTTP 404. Missing: " + ($missingAssets -join ", "))
+}
 if (!(Test-Path $bridge)) { throw "Native bridge missing. Run build-native.ps1 -AdlxSdkDirectory ./third_party/ADLX, then publish-windows.ps1, then retry doctor." }
 Write-Host "ADLX capability discovery:"
 & $bridge discover

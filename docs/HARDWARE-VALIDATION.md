@@ -5,7 +5,7 @@ This checklist is directly executable on a Windows machine and must be performed
 ## Gate 0 — prerequisite checks (no writes)
 
 1. Ensure GPU clocks/voltages are at known Adrenalin defaults. Export a separate backup of your current tuning profile.
-2. Confirm AMD ADLX 2.0 SDK code is from GPUOpen; use Visual Studio x64 Developer PowerShell, .NET 10 SDK.
+2. Confirm the native bridge was compiled from AMD's official ADLX SDK at the pinned revision. The CI-generated complete development bundle works without Visual Studio Build Tools; the local source build requires the MSVC x64 C++ toolchain. .NET 10 is required for local managed builds.
 3. Build and run:
 
        ./scripts/build-native.ps1 -AdlxSdkDirectory ./third_party/ADLX
@@ -16,6 +16,27 @@ This checklist is directly executable on a Windows machine and must be performed
 5. Launch in read-only mode. Check that there are no tuning changes after navigation or refresh:
 
        ./artifacts/app/AmdTune.Web.exe --hardware
+
+## Observed read-only RX 9070 XT results — November 15, 2026
+
+First direct hardware report, based on an operator-run, read-only hardware doctor (not CI):
+
+| Metric | Observed |
+| --- | --- |
+| GPU name | AMD Radeon RX 9070 XT |
+| ADLX | 2.0 native bridge; one discrete GPU |
+| Voltage offset range | -200 to 0 mV; step 1 mV |
+| VRAM frequency range | 2518 to 3000 MHz; step 2 MHz |
+| Memory timings adjustable | Yes (driver capability discovery) |
+| Current configured offset / VRAM limit | 0 mV / 2518 MHz |
+| Idle hotspot / board power | 26°C / 10 W |
+| Idle instant clocks | Core 0 MHz / memory 1 MHz (not a configured clock limit) |
+| Driver settings readback | Successful |
+| GPU writes exercised | None |
+
+Interpretation: native ADLX discovery, capability ranges, configured settings readback, and idle telemetry work on this machine. These are device-reported ranges, **not safe operating limits or a verified overclock**. Instantaneous idle clocks may report zero or near-zero; readings under load have not been tested.
+
+The initial browser launch returned HTTP 404 for `/` because the host assumed the current working directory contained `wwwroot`. This is separate from successful ADLX discovery. The host has been fixed to resolve packaged UI assets relative to the application; CI now smoke-tests `/`, `/app.js`, and `/styles.css` from an unrelated working directory. **Gate 0 browser validation must still be repeated after the fixed build is installed.**
 
 ## Gate 1 — conservative first write (will modify hardware)
 

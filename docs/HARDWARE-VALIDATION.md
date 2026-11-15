@@ -196,6 +196,27 @@ sustained-profile trial is the next write safety test. Automatic tuning stays
 disabled pending real failure-injection, longer stability and calibrated GPU
 timing.
 
+## Sustained physical read-only verification: PASS (November 15, 2026)
+
+The RX 9070 XT operator validated source commit `8bb1a333` with a recent ADLX bridge. **Current settings were a custom profile** of `-50 mV` voltage offset, `2700 MHz` configured VRAM limit and `Fast` timings. Initial and final ADLX settings matched; no candidate tune was applied.
+
+| Workload | Measured window | Passes | Checked outputs | Mismatches | ADLX active/total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Compute | 753.5 ms | 6,874 | 1,048,576 | 0 | 1/2 |
+| Memory | 831.6 ms | 268 | 33,554,432 | 0 | 1/2 |
+| Mixed | 759.9 ms | 1,895 | 4,194,304 | 0 | 1/1 |
+
+The command printed `GPU_VERIFY_PASS`. Concurrent sensor shutdown did not spuriously fail Mixed. `hardware-doctor.ps1` printed `Native bridge GPU utilization telemetry schema: True`, and returned idle utilization 0% before and after validation. **Do not treat** the one loaded board-power reading per workload (51 W compute, 54 W memory, 40 W mixed) as a stable power or performance-per-watt estimate; the number and sampling cadence are insufficient. Host-timed synthetic elements/s is not GPU timestamp timing, VRAM bandwidth or a gaming benchmark.
+
+The operator initially attempted to extract the current native bridge into a directory containing the same filename; `gh run download` reported `file exists`. This did not compromise the read-only validation: the bridge actually invoked does advertise the optional utilization field. A failed download does **not** establish byte-for-byte binary provenance; to require exact build verification compare SHA-256 hashes with the current CI artifact.
+
+**Next gate, READ-ONLY, with the same known custom profile:**
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark --soak-seconds 60
+    ./scripts/hardware-doctor.ps1
+
+Expected: `GPU_SOAK_PASS`, zero mismatches, unchanged driver settings, a new audit under `%LOCALAPPDATA%/AmdTune/soaks`. It runs repeated ~750ms host-timed GPU work with CPU verification breaks and is **not** 60 seconds of uninterrupted graphics load. Before meaningful stock-vs-overclock experiments, save the custom profile and restore factory defaults manually in Adrenalin, verify readback, then perform independently comparable runs. No write-enabled sweep, auto-tuning or fault injection yet.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

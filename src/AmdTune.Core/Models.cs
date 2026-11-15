@@ -34,7 +34,28 @@ public sealed record WorkloadMeasurement(
     double Score,
     string ScoreUnit,
     double ElapsedMilliseconds,
-    string Detail);
+    string Detail,
+    WorkloadTelemetryEvidence? TelemetryEvidence = null);
+
+/// <summary>
+/// ADLX snapshots around a workload. Sampling is asynchronous and NOT aligned
+/// with the GPU's execution timeline; missing active-load samples remain unknown.
+/// </summary>
+public sealed record WorkloadTelemetryEvidence(
+    DateTimeOffset StartedAt,
+    DateTimeOffset FinishedAt,
+    int SampleCount,
+    int ActiveSamples,
+    double? PeakHotspotC,
+    double? MaxBoardPowerW,
+    double? MeanActiveBoardPowerW,
+    double? MeanActiveUtilizationPercent,
+    double? MeanActiveCoreClockMhz,
+    IReadOnlyList<GpuTelemetry> Samples)
+{
+    public bool HasUsefulLoadEvidence => ActiveSamples >= 3 &&
+        MeanActiveBoardPowerW is > 0 && MeanActiveCoreClockMhz is > 0;
+}
 
 public sealed record TrialResult(
     TuningSettings Settings,
@@ -43,7 +64,8 @@ public sealed record TrialResult(
     IReadOnlyList<WorkloadMeasurement> Measurements,
     GpuTelemetry? Telemetry,
     DateTimeOffset At,
-    IReadOnlyList<KindComparison>? Comparisons = null);
+    IReadOnlyList<KindComparison>? Comparisons = null,
+    TrialEvidence? Evidence = null);
 
 public sealed record AuditEvent(DateTimeOffset At, string Kind, string Detail, TuningSettings? Settings = null);
 

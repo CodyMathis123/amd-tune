@@ -40,6 +40,20 @@ function displayReport(report) {
     if (trial.comparisons) for (const comparison of trial.comparisons) {
       lines.push('    ' + nameOf(workloadNames, comparison.kind) + ': ' + comparison.percentChange.toFixed(2) + '% versus A/B/A reference; drift ' + comparison.referenceDriftPercent.toFixed(2) + '%');
     }
+    if (trial.evidence) {
+      const ev = trial.evidence;
+      lines.push('    Correctness: ' + (ev.allGpuResultsCorrect ? 'passed sampled GPU final-state checks' : 'NOT VERIFIED'));
+      lines.push('    Candidate host-timed workload total: ' + ev.candidateMeasuredSeconds.toFixed(3) + ' s (NOT GPU-only time)');
+      lines.push('    Auto-tuning readiness: ' + (ev.suitableForAutomaticTuning ? 'eligible' : 'LOCKED'));
+      for (const q of ev.workloads) {
+        lines.push('      ' + nameOf(workloadNames, q.kind) + ' evidence quality: ' +
+          (q.comparisonUsable ? 'usable for exploratory comparison' : 'INSUFFICIENT') +
+          '; min duration ' + q.minimumHostTimedMilliseconds.toFixed(1) + ' ms' +
+          '; active telemetry samples ' + q.activeTelemetrySamples);
+        for (const issue of q.limitations) lines.push('        • ' + issue);
+      }
+      for (const issue of ev.remainingRequirements) lines.push('    • ' + issue);
+    }
   }
   if (report.error) lines.push('Error: ' + report.error);
   value('report', lines.join('\n'));
@@ -72,6 +86,7 @@ async function refreshTelemetry() {
     const t = await request('/api/telemetry');
     value('hotspot', t.hotspotC == null ? 'Unavailable' : t.hotspotC.toFixed(1) + ' °C');
     value('power', t.boardPowerW == null ? 'Unavailable' : t.boardPowerW.toFixed(0) + ' W');
+    value('gpuusage', t.utilizationPercent == null ? 'Unavailable' : t.utilizationPercent.toFixed(1) + '%');
     value('coreclock', t.coreClockMhz == null ? 'Unavailable' : t.coreClockMhz + ' MHz');
     value('memclock', t.memoryClockMhz == null ? 'Unavailable' : t.memoryClockMhz + ' MHz');
   } catch (e) { value('hotspot', e.message); }

@@ -37,6 +37,11 @@ builder.WebHost.UseUrls("http://127.0.0.1:5783");
 var hardware = args.Contains("--hardware", StringComparer.OrdinalIgnoreCase);
 var writeRequested = args.Contains("--enable-hardware-writes", StringComparer.OrdinalIgnoreCase);
 var extendedBenchmark = args.Contains("--extended-benchmark", StringComparer.OrdinalIgnoreCase);
+var sustainedBenchmark = args.Contains("--sustained-benchmark", StringComparer.OrdinalIgnoreCase);
+if (sustainedBenchmark && !hardware)
+    throw new InvalidOperationException("--sustained-benchmark requires --hardware.");
+if (sustainedBenchmark && extendedBenchmark)
+    throw new InvalidOperationException("Choose exactly one of --sustained-benchmark and --extended-benchmark.");
 if (extendedBenchmark && !hardware)
     throw new InvalidOperationException("--extended-benchmark requires --hardware.");
 
@@ -57,7 +62,10 @@ if (hardware)
     builder.Services.AddSingleton<IRollbackGuard>(_ =>
         new ExternalRecoveryGuard(Path.Combine(dataDir, "recovery"), recoveryPath, bridge));
     builder.Services.AddSingleton<IWorkloadRunner>(sp =>
-        new ComputeSharpWorkloadRunner(sp.GetRequiredService<IGpuDevice>(), extendedBenchmark));
+        sustainedBenchmark
+            ? new SustainedGpuBenchmarkRunner(sp.GetRequiredService<IGpuDevice>())
+            : new ComputeSharpWorkloadRunner(sp.GetRequiredService<IGpuDevice>(), extendedBenchmark));
+    builder.Services.AddSingleton<IWorkloadTelemetryRecorder, WorkloadTelemetryRecorder>();
 }
 else
 {
@@ -74,47 +82,125 @@ builder.Services.AddSingleton(sp =>
 
 var app = builder.Build();
 
-// Command-line read-only workload validation. No tuning, no watchdog, no HTTP listener.
+// Read-only correctness soak. It deliberately does NOT apply tuning values.
+var soakFlagIndex = Array.FindIndex(args, a =>
+    string.Equals(a, "--soak-seconds", StringComparison.OrdinalIgnoreCase));
+var soakSeconds = 0;
+if (soakFlagIndex >= 0)
+{
+    if (!hardware || writeRequested || !args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase))
+        throw new InvalidOperationException("--soak-seconds is read-only and requires --hardware --verify-gpu.");
+    if (soakFlagIndex + 1 >= args.Length ||
+        !int.TryParse(args[soakFlagIndex + 1], out soakSeconds) ||
+        soakSeconds is < 30 or > 180)
+        throw new ArgumentOutOfRangeException(nameof(soakSeconds), "Use --soak-seconds 30 through 180.");
+}
+
+// Command-line read-only workload verification / bounded repeatability soak.
 if (args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase))
 {
     if (!hardware || writeRequested)
         throw new InvalidOperationException("--verify-gpu requires --hardware and forbids hardware writes.");
     var gpu = app.Services.GetRequiredService<IGpuDevice>();
     var runner = app.Services.GetRequiredService<IWorkloadRunner>();
+    var telemetryRecorder = app.Services.GetRequiredService<IWorkloadTelemetryRecorder>();
     Console.WriteLine("GPU VERIFY: read-only DX12 tests, no driver tuning writes.");
-    Console.WriteLine("Benchmark profile: " + (extendedBenchmark ? "EXTENDED (untimed GPU warmup + bounded repeated dispatch)" : "QUICK"));
+    Console.WriteLine("Benchmark profile: " + (sustainedBenchmark ? "SUSTAINED-HOST-TIMED" : extendedBenchmark ? "EXTENDED" : "QUICK") +
+                      (soakSeconds > 0 ? $"; CORRECTNESS SOAK for >= {soakSeconds}s" : ""));
     var baseline = await gpu.ReadSettingsAsync(CancellationToken.None);
+    var sessionId = Guid.NewGuid();
+    var sessionStarted = DateTimeOffset.UtcNow;
+    var results = new List<WorkloadMeasurement>();
+    var passed = false;
+    string? diagnosticError = null;
+    var final = baseline;
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
     {
-        foreach (var kind in Enum.GetValues<WorkloadKind>())
+        int cycle = 0;
+        do
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-            Console.WriteLine($"Running {kind} workload at original driver settings...");
-            var result = await runner.RunAsync(kind, 49191, timeout.Token);
-            Console.WriteLine($"{kind}: GPU={result.ExecutedOnGpu}, correct={result.Correct}, " +
-                $"checked={result.CheckedElements}, mismatches={result.Mismatches}, " +
-                $"score={result.Score:N0} {result.ScoreUnit}, duration={result.ElapsedMilliseconds:N1} ms");
-            Console.WriteLine(result.Detail);
-            if (!result.ExecutedOnGpu || !result.Correct || result.Mismatches != 0)
-                throw new HardwareException("DX12 result did not pass GPU correctness validation.");
-        }
-        Console.WriteLine("GPU_VERIFY_PASS");
+            cycle++;
+            foreach (var kind in Enum.GetValues<WorkloadKind>())
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                Console.WriteLine($"Running {kind}, cycle {cycle}, original driver settings...");
+                var result = await telemetryRecorder.CaptureAsync(
+                    token => runner.RunAsync(kind, 49191 + cycle, token),
+                    maxHotspotC: 90, timeout.Token);
+                results.Add(result);
+                Console.WriteLine($"{kind}: GPU={result.ExecutedOnGpu}, correct={result.Correct}, " +
+                    $"checked={result.CheckedElements}, mismatches={result.Mismatches}, " +
+                    $"score={result.Score:N0} {result.ScoreUnit}, duration={result.ElapsedMilliseconds:N1} ms");
+                Console.WriteLine(result.Detail);
+                Console.WriteLine($"ADLX samples={result.TelemetryEvidence?.SampleCount ?? 0}; " +
+                    $"active samples={result.TelemetryEvidence?.ActiveSamples ?? 0}; " +
+                    $"loaded mean power={result.TelemetryEvidence?.MeanActiveBoardPowerW?.ToString("F1") ?? "not measured"} W");
+                if (!result.ExecutedOnGpu || !result.Correct || result.Mismatches != 0)
+                    throw new HardwareException("DX12 result did not pass GPU correctness validation.");
+            }
+        } while (soakSeconds > 0 && stopwatch.Elapsed.TotalSeconds < soakSeconds);
+        passed = true;
     }
     catch (Exception error)
     {
+        diagnosticError = error.ToString();
         Console.Error.WriteLine("GPU_VERIFY_FAIL: " + error);
         Environment.ExitCode = 1;
     }
     finally
     {
-        var actual = await gpu.ReadSettingsAsync(CancellationToken.None);
-        Console.WriteLine($"Initial settings: {baseline}");
-        Console.WriteLine($"Final settings: {actual}");
-        if (actual != baseline)
+        try
         {
-            Console.Error.WriteLine("GPU_VERIFY_FAIL: driver state changed during read-only test.");
-            Environment.ExitCode = 1;
+            final = await gpu.ReadSettingsAsync(CancellationToken.None);
+            if (baseline != final)
+            {
+                diagnosticError = "Driver settings changed during read-only test.";
+                passed = false;
+                Environment.ExitCode = 1;
+                Console.Error.WriteLine("GPU_VERIFY_FAIL: " + diagnosticError);
+            }
         }
+        catch (Exception error)
+        {
+            diagnosticError = "Final driver readback failed: " + error;
+            passed = false;
+            Environment.ExitCode = 1;
+            Console.Error.WriteLine("GPU_VERIFY_FAIL: " + diagnosticError);
+        }
+        Console.WriteLine($"Initial settings: {baseline}");
+        Console.WriteLine($"Final settings: {final}");
+        var reportDirectory = Path.Combine(dataDir, "soaks");
+        Directory.CreateDirectory(reportDirectory);
+        var destination = Path.Combine(reportDirectory, sessionId.ToString("N") + ".json");
+        var report = new
+        {
+            SchemaVersion = 1,
+            SessionId = sessionId,
+            Simulated = false,
+            StartedAt = sessionStarted,
+            FinishedAt = DateTimeOffset.UtcNow,
+            RequestedSoakSeconds = soakSeconds,
+            BenchmarkProfile = sustainedBenchmark ? "sustained" : extendedBenchmark ? "extended" : "quick",
+            OriginalSettings = baseline,
+            FinalSettings = final,
+            Completed = passed,
+            Error = diagnosticError,
+            Measurements = results,
+            Limitations = "Read-only repeated correctness, not continuous full-load stress. ADLX sampling is asynchronous; host timing is not GPU-only; no long-term stability claim."
+        };
+        var temp = destination + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp,
+                System.Text.Json.JsonSerializer.Serialize(report,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temp, destination, true);
+            Console.WriteLine("Audit: " + destination);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+        Console.WriteLine(passed ? (soakSeconds > 0 ? "GPU_SOAK_PASS" : "GPU_VERIFY_PASS") : "GPU_VERIFY_FAIL");
+        if (!passed) Environment.ExitCode = 1;
     }
     return;
 }
@@ -149,7 +235,7 @@ app.UseStaticFiles();
 app.MapGet("/api/info", () => new
 {
     mode = hardware ? "hardware" : "simulation",
-    benchmarkProfile = extendedBenchmark ? "extended" : "quick",
+    benchmarkProfile = sustainedBenchmark ? "sustained" : extendedBenchmark ? "extended" : "quick",
     canWrite = !hardware || writeRequested,
     recoveryInstalled = File.Exists(recoveryPath),
     bridgeInstalled = File.Exists(bridgePath),

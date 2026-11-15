@@ -9,7 +9,8 @@ public sealed class TuningEngine(
     IWorkloadRunner workload,
     IAuditStore audit,
     IRollbackGuard guard,
-    TunePolicy policy)
+    TunePolicy policy,
+    IWorkloadTelemetryRecorder? telemetryRecorder = null)
 {
     private readonly SemaphoreSlim _exclusive = new(1, 1);
 
@@ -86,13 +87,20 @@ public sealed class TuningEngine(
                 Emit(RunPhase.Baseline, "A: repeating stock reference to quantify drift");
                 var after = await ExecutePasses(cancellationToken);
                 var comparisons = MeasurementAnalysis.Compare(before, candidateResults, after);
+                var evidence = EvidenceAssessment.Evaluate(before, candidateResults, after, comparisons);
                 var verdict = TunePolicy.Decide(candidateResults);
                 var reason = verdict == TrialVerdict.Accepted
                     ? "All verified GPU workloads passed; long-term gaming stability not established."
                     : "Result is synthetic, incorrect or otherwise inconclusive.";
                 if (verdict == TrialVerdict.Accepted)
                 {
-                    if (comparisons.Any(x => Math.Abs(x.ReferenceDriftPercent) > 5 ||
+                    if (evidence.Workloads.Any(q => !q.ComparisonUsable))
+                    {
+                        verdict = TrialVerdict.Inconclusive;
+                        reason = "Correctness passed, but evidence quality insufficient for performance comparison. " +
+                                 "See per-workload quality limitations.";
+                    }
+                    else if (comparisons.Any(x => Math.Abs(x.ReferenceDriftPercent) > 5 ||
                             x.Before.CoefficientOfVariationPercent > 5 ||
                             x.Candidate.CoefficientOfVariationPercent > 5 ||
                             x.After.CoefficientOfVariationPercent > 5))
@@ -107,7 +115,7 @@ public sealed class TuningEngine(
                     }
                 }
                 trialResults.Add(new TrialResult(candidate, verdict, reason,
-                    candidateResults, reading, DateTimeOffset.UtcNow, comparisons));
+                    candidateResults, reading, DateTimeOffset.UtcNow, comparisons, evidence));
             }
 
             phase = RunPhase.Completed;
@@ -208,7 +216,11 @@ public sealed class TuningEngine(
                     WorkloadMeasurement value;
                     try
                     {
-                        value = await workload.RunAsync(kind, plan.Seed + repetition, workloadBudget.Token);
+                        value = telemetryRecorder is null || capabilities?.IsSimulation == true
+                            ? await workload.RunAsync(kind, plan.Seed + repetition, workloadBudget.Token)
+                            : await telemetryRecorder.CaptureAsync(
+                                token => workload.RunAsync(kind, plan.Seed + repetition, token),
+                                plan.MaxHotspotC, workloadBudget.Token);
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {

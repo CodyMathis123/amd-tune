@@ -182,6 +182,20 @@ repetitions, 0 MHz memory increase, and unchanged timings. Confirm
 `RollbackVerified=true` afterward. Do not interpret quick versus extended
 raw throughput numbers as a valid A/B comparison.
 
+## Measurement research and sustained profile
+
+Research and explicit next steps are in
+[Measurement Methodology](MEASUREMENT-RESEARCH.md). The old quick/extended
+timings of 4–73 ms were not sufficient to infer GPU performance improvements,
+and idle post-load power readings were not valid loaded-power observations.
+
+With the new version, **run read-only first**, including one bounded
+60-second repeated-correctness soak. Check original ADLX settings after both
+steps. If correctness passes and sampling remains healthy, a single -15 mV
+sustained-profile trial is the next write safety test. Automatic tuning stays
+disabled pending real failure-injection, longer stability and calibrated GPU
+timing.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

@@ -81,6 +81,38 @@ If you already have third_party/ADLX, skip the clone and keep the pinned revisio
 
 The UI shows actual ADLX capabilities, raw driver limits and device name; candidates cannot be submitted.
 
+### Sustained host-timed profiling and separate stability evidence
+
+The new opt-in `--sustained-benchmark` profile targets at least 750 ms
+per host-timed DX12 workload (unless the hard dispatch cap is reached). It
+warms the GPU and repeats bounded passes while using sticky error flags to
+preserve evidence of intermediate mismatches. Unlike the quick and extended
+profiles, this mode is intended to improve the *duration* of each host-side
+measurement. It does **not** implement native GPU timestamp queries.
+
+Native ADLX now optionally reports utilization percentage, and physical
+tuning trials save concurrent telemetry snapshots with a per-workload
+sampling-quality record. The explicit trial evidence gate refuses to enable
+automatic tuning without reliable host windows, stable stock references,
+active GPU telemetry, independent long-run stability and crash recovery.
+
+Start with read-only tests:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu --sustained-benchmark --soak-seconds 60
+
+The second command exercises 60 seconds of *repeated correctness checks*,
+not 60 seconds of uninterrupted graphics load; individual checks include
+CPU oracle time. Both commands forbid hardware tuning writes.
+Diagnostic JSON reports are stored under `%LOCALAPPDATA%/AmdTune/soaks`.
+Only after read-only validation should you consider a **single**, supervised
+-15mV nonpersistent tuning experiment using
+`--hardware --enable-hardware-writes --sustained-benchmark`.
+Never mix scores from different profile types.
+
+See [measurement methodology](docs/MEASUREMENT-RESEARCH.md) for sources,
+criteria, limitations, and the gated roadmap toward automatic tuning.
+
 ### Extended benchmarking profile (opt-in; recommended next validation)
 
 Existing short run measurements are just ~5–70 ms per workload and do not establish

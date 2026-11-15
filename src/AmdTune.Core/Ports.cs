@@ -15,6 +15,18 @@ public interface IWorkloadRunner
     Task<WorkloadMeasurement> RunAsync(WorkloadKind kind, int seed, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Optional real-hardware measurement wrapper. Its telemetry snapshots are
+/// asynchronous, not synchronized to the GPU command queue.
+/// </summary>
+public interface IWorkloadTelemetryRecorder
+{
+    Task<WorkloadMeasurement> CaptureAsync(
+        Func<CancellationToken, Task<WorkloadMeasurement>> workload,
+        double maxHotspotC,
+        CancellationToken cancellationToken);
+}
+
 /// <summary>Untrusted workloads are never allowed to persist a tune.</summary>
 public interface IAuditStore
 {

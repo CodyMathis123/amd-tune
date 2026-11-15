@@ -111,8 +111,14 @@ static int Execute(int argc,char** argv) {
             ADLX_FAILED(sample->GPUClockSpeed(&core)) ||
             ADLX_FAILED(sample->GPUVRAMClockSpeed(&memory)))
             throw std::runtime_error("Required live GPU metrics unavailable.");
+        adlx_double usage=0;
+        const bool hasUsage=ADLX_SUCCEEDED(sample->GPUUsage(&usage)) && usage>=0 && usage<=100;
         std::cout<<"{\"at\":\""<<IsoUtc()<<"\",\"hotspotC\":"<<hotspot<<",\"boardPowerW\":"
-                 <<power<<",\"coreClockMhz\":"<<core<<",\"memoryClockMhz\":"<<memory<<"}"<<std::endl;
+                 <<power<<",\"coreClockMhz\":"<<core<<",\"memoryClockMhz\":"<<memory
+                 <<",\"utilizationPercent\":";
+        if (hasUsage) std::cout<<usage;
+        else std::cout<<"null";
+        std::cout<<"}"<<std::endl;
     } else if (cmd=="apply" && argc==5) {
         if (!ranges) throw std::runtime_error("Driver limits unknown; refusing write.");
         const int uv=std::stoi(argv[2]), clock=std::stoi(argv[3]);

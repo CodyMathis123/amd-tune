@@ -23,7 +23,7 @@ public sealed record DeviceCapabilities(
     IReadOnlyList<string> Warnings);
 
 public sealed record TuningSettings(int VoltageOffsetMv, int MemoryClockMhz, MemoryTimingMode MemoryTiming);
-public sealed record GpuTelemetry(DateTimeOffset At, double? HotspotC, double? BoardPowerW, int? CoreClockMhz, int? MemoryClockMhz);
+public sealed record GpuTelemetry(DateTimeOffset At, double? HotspotC, double? BoardPowerW, int? CoreClockMhz, int? MemoryClockMhz, double? UtilizationPercent = null);
 
 public sealed record WorkloadMeasurement(
     WorkloadKind Kind,

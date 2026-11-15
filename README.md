@@ -81,6 +81,25 @@ If you already have third_party/ADLX, skip the clone and keep the pinned revisio
 
 The UI shows actual ADLX capabilities, raw driver limits and device name; candidates cannot be submitted.
 
+### 3B. Read-only GPU correctness diagnostic
+
+Before any tuning write, validate the actual DirectX 12 compute workloads at
+current GPU settings:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu
+    ./scripts/hardware-doctor.ps1
+
+This executes real GPU Compute, Memory and Mixed workloads and checks every
+returned element against a deterministic CPU reference. It is **read-only**:
+no tuning operation, candidate, watchdog lease, or settings application occurs.
+A large memory buffer is divided into bounded 1D DX12 dispatches to respect
+the 65,535-groups-per-dimension limit; the original 128 MiB single-dispatch
+attempt failed with `groupsX=524288` on an RX 9070 XT.
+
+The diagnostic prints `GPU_VERIFY_PASS` only when all three workloads agree
+with the CPU oracle and the original driver tuning settings are unchanged.
+Any errors block the hardware-write smoke test.
+
 ### 4. Hardware-write smoke test (only once read-only discovery is verified)
 
 Read [docs/HARDWARE-VALIDATION.md](docs/HARDWARE-VALIDATION.md), stop other GPU-tuning tools, save your Adrenalin profile, and ensure recovery logs can be collected. After you understand the rollback limitations, opt in explicitly:

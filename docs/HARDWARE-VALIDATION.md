@@ -66,6 +66,38 @@ The engine now has a **separate two-second heartbeat** independent of benchmark 
 
 CI tests the heartbeat timer independently with injected failures. Physical GPU workload and rollback behavior remain unverified and must be observed during Gate 1.
 
+## Gate 0D — Read-only DirectX 12 workload verification
+
+An early physical experiment produced **zero completed trials** with a reported
+`ArgumentOutOfRangeException (groupsX = 524288)` in the 128 MiB memory workload.
+The engine subsequently verified rollback, and ADLX discovery confirmed the original
+0 mV/2518 MHz/default-timing settings. The older JSON report alone does not prove
+whether a candidate write was attempted; consult the corresponding `.events.jsonl`.
+
+**Cause:** ComputeSharp's default 64-thread X group size produced 524,288 groups
+for a 33,554,432-element test. The standard DirectX 12 per-dimension dispatch limit
+is 65,535 groups. Source: Microsoft [D3D12 Dispatch documentation](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12graphicscommandlist-dispatch).
+
+**Fix:** split the memory workload into 1,048,576-element dispatches
+(16,384 groups each), passing an absolute base offset to the shader so all
+33,554,432 results are still independently verified. CI covers slice boundaries,
+full coverage, and the 128 MiB case without physical hardware.
+
+**Required next check, NO tuning writes:**
+
+    git pull --ff-only
+    ./scripts/publish-windows.ps1
+    ./artifacts/app/AmdTune.Web.exe --hardware --verify-gpu
+    ./scripts/hardware-doctor.ps1
+
+Expected: `GPU_VERIFY_PASS` with independent CPU/GPU correctness for Compute,
+Memory, and Mixed workloads; initial and final settings identical. This diagnostic
+does **not** call `ApplyAsync` or start a tuning session. It still executes GPU
+workloads and thus may trigger driver instability on faulty hardware.
+
+If this does not pass, do not start a tuning experiment. Share the console output
+and audit log. Only attempt Gate 1 after this read-only check passes.
+
 ## Gate 1 — conservative first write (will modify hardware)
 
 Only proceed after verifying Gate 0. Stop other tuning tools (Adrenalin's manual profile editor, MSI Afterburner, etc.). Save important work. Real GPU instability may reset the display driver or system.

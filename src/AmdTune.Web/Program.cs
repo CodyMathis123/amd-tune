@@ -68,6 +68,51 @@ builder.Services.AddSingleton(sp =>
     new ExperimentManager(sp.GetRequiredService<TuningEngine>(), !hardware || writeRequested));
 
 var app = builder.Build();
+
+// Command-line read-only workload validation. No tuning, no watchdog, no HTTP listener.
+if (args.Contains("--verify-gpu", StringComparer.OrdinalIgnoreCase))
+{
+    if (!hardware || writeRequested)
+        throw new InvalidOperationException("--verify-gpu requires --hardware and forbids hardware writes.");
+    var gpu = app.Services.GetRequiredService<IGpuDevice>();
+    var runner = app.Services.GetRequiredService<IWorkloadRunner>();
+    Console.WriteLine("GPU VERIFY: read-only DX12 tests, no driver tuning writes.");
+    var baseline = await gpu.ReadSettingsAsync(CancellationToken.None);
+    try
+    {
+        foreach (var kind in Enum.GetValues<WorkloadKind>())
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            Console.WriteLine($"Running {kind} workload at original driver settings...");
+            var result = await runner.RunAsync(kind, 49191, timeout.Token);
+            Console.WriteLine($"{kind}: GPU={result.ExecutedOnGpu}, correct={result.Correct}, " +
+                $"checked={result.CheckedElements}, mismatches={result.Mismatches}, " +
+                $"score={result.Score:N0} {result.ScoreUnit}, duration={result.ElapsedMilliseconds:N1} ms");
+            Console.WriteLine(result.Detail);
+            if (!result.ExecutedOnGpu || !result.Correct || result.Mismatches != 0)
+                throw new HardwareException("DX12 result did not pass GPU correctness validation.");
+        }
+        Console.WriteLine("GPU_VERIFY_PASS");
+    }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine("GPU_VERIFY_FAIL: " + error);
+        Environment.ExitCode = 1;
+    }
+    finally
+    {
+        var actual = await gpu.ReadSettingsAsync(CancellationToken.None);
+        Console.WriteLine($"Initial settings: {baseline}");
+        Console.WriteLine($"Final settings: {actual}");
+        if (actual != baseline)
+        {
+            Console.Error.WriteLine("GPU_VERIFY_FAIL: driver state changed during read-only test.");
+            Environment.ExitCode = 1;
+        }
+    }
+    return;
+}
+
 const string origin = "http://127.0.0.1:5783";
 var csrfToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 

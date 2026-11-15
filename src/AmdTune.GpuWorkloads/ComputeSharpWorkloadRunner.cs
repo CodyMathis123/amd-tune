@@ -46,7 +46,15 @@ public sealed class ComputeSharpWorkloadRunner(IGpuDevice device) : IWorkloadRun
         cancellationToken.ThrowIfCancellationRequested();
         var sw = Stopwatch.StartNew();
         using ReadWriteBuffer<int> buffer = gpu.AllocateReadWriteBuffer(input);
-        gpu.For(count, new CheckKernel(buffer, rounds));
+        // 128 MiB requires 524,288 X groups in one call; DX12 allows
+        // 65,535 groups per dimension on the portable dispatch path.
+        // Each slice uses the same buffer and retains global indexing.
+        var dispatches = GpuDispatchPlanner.Plan(count);
+        foreach (var slice in dispatches)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            gpu.For(slice.Length, new CheckKernel(buffer, rounds, slice.Offset));
+        }
         buffer.CopyTo(input);
         sw.Stop();
         cancellationToken.ThrowIfCancellationRequested();
@@ -64,7 +72,7 @@ public sealed class ComputeSharpWorkloadRunner(IGpuDevice device) : IWorkloadRun
         return new WorkloadMeasurement(
             kind, true, mismatches == 0, count, mismatches,
             Math.Round(count / (duration / 1000.0), 2), "verified elements/s (includes transfer)",
-            duration, $"DX12 adapter: {gpu.Name}; {count:N0} elements; {rounds} integer rounds; all elements checked; no ECC counter inferred.");
+            duration, $"DX12 adapter: {gpu.Name}; {count:N0} elements, {dispatches.Count} dispatches; {rounds} integer rounds; all elements checked; no ECC counter inferred.");
     }
 
     public static string? ExtractModel(string name)
@@ -74,14 +82,14 @@ public sealed class ComputeSharpWorkloadRunner(IGpuDevice device) : IWorkloadRun
     }
 }
 
-[ThreadGroupSize(DefaultThreadGroupSizes.X)]
+[ThreadGroupSize(GpuDispatchPlanner.ThreadsPerGroup, 1, 1)]
 [GeneratedComputeShaderDescriptor]
 [SupportedOSPlatform("windows6.2")]
-internal readonly partial struct CheckKernel(ReadWriteBuffer<int> buffer, int rounds) : IComputeShader
+internal readonly partial struct CheckKernel(ReadWriteBuffer<int> buffer, int rounds, int baseOffset) : IComputeShader
 {
     public void Execute()
     {
-        int i = ThreadIds.X;
+        int i = ThreadIds.X + baseOffset;
         int value = buffer[i];
         for (int j = 0; j < rounds; j++)
             value = ((value ^ (i + j * 17)) + 29) & 0x3FFFFFFF;

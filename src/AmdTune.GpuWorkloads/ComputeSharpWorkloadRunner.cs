@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using AmdTune.Core;
 using ComputeSharp;
@@ -75,6 +76,7 @@ public sealed class ComputeSharpWorkloadRunner(IGpuDevice device) : IWorkloadRun
 
 [ThreadGroupSize(DefaultThreadGroupSizes.X)]
 [GeneratedComputeShaderDescriptor]
+[SupportedOSPlatform("windows")]
 internal readonly partial struct CheckKernel(ReadWriteBuffer<int> buffer, int rounds) : IComputeShader
 {
     public void Execute()

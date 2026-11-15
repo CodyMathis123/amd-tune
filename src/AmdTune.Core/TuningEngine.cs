@@ -53,43 +53,48 @@ public sealed class TuningEngine(
             foreach (var candidate in plan.Candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Emit(RunPhase.Applying, $"Applying candidate {trialResults.Count + 1} of {plan.Candidates.Count}");
                 await guard.PulseAsync(cancellationToken);
-                TunePolicy.RequireReadback(original,
-                    await device.ReadSettingsAsync(cancellationToken));
+                TunePolicy.RequireReadback(original, await device.ReadSettingsAsync(cancellationToken));
 
+                // A/B/A minimizes false wins from the GPU heating up or system load drifting.
+                Emit(RunPhase.Baseline, "A: measuring current stock configuration");
+                var before = await ExecutePasses(cancellationToken);
+
+                Emit(RunPhase.Applying, $"B: applying candidate {trialResults.Count + 1}/{plan.Candidates.Count}");
                 await device.ApplyAsync(candidate, cancellationToken);
-                Emit(RunPhase.Verifying, "Verifying actual driver settings");
-                TunePolicy.RequireReadback(candidate,
-                    await device.ReadSettingsAsync(cancellationToken));
-
-                var readings = new List<WorkloadMeasurement>();
-                for (var repetition = 0; repetition < plan.Repetitions; repetition++)
-                {
-                    foreach (var kind in Enum.GetValues<WorkloadKind>())
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        await guard.PulseAsync(cancellationToken);
-                        TunePolicy.RequireTelemetry(
-                            await device.ReadTelemetryAsync(cancellationToken), plan.MaxHotspotC);
-                        Emit(RunPhase.Benchmarking, $"Running {kind} pass {repetition + 1}/{plan.Repetitions}");
-                        var result = await workload.RunAsync(kind, plan.Seed + repetition, cancellationToken);
-                        readings.Add(result);
-                        if (!result.Correct || result.Mismatches != 0)
-                            throw new SafetyException($"Correctness check failed on {kind}: {result.Detail}");
-                    }
-                }
-
+                Emit(RunPhase.Verifying, "Verifying requested values against driver readback");
+                TunePolicy.RequireReadback(candidate, await device.ReadSettingsAsync(cancellationToken));
+                var candidateResults = await ExecutePasses(cancellationToken);
                 var reading = await device.ReadTelemetryAsync(cancellationToken);
                 TunePolicy.RequireTelemetry(reading, plan.MaxHotspotC);
-                var verdict = TunePolicy.Decide(readings);
-                trialResults.Add(new TrialResult(candidate, verdict,
-                    verdict == TrialVerdict.Accepted ? "Specified workloads passed; long-term stability unproven."
-                    : "Result inconclusive; not safe to persist.", readings, reading, DateTimeOffset.UtcNow));
 
-                Emit(RunPhase.RollingBack, "Restoring original driver settings");
-                // No candidate is left applied across trials.
+                Emit(RunPhase.RollingBack, "Restoring original settings before reference repeat");
                 await RestoreAndVerify(original);
+                Emit(RunPhase.Baseline, "A: repeating stock reference to quantify drift");
+                var after = await ExecutePasses(cancellationToken);
+                var comparisons = MeasurementAnalysis.Compare(before, candidateResults, after);
+                var verdict = TunePolicy.Decide(candidateResults);
+                var reason = verdict == TrialVerdict.Accepted
+                    ? "All verified GPU workloads passed; long-term gaming stability not established."
+                    : "Result is synthetic, incorrect or otherwise inconclusive.";
+                if (verdict == TrialVerdict.Accepted)
+                {
+                    if (comparisons.Any(x => Math.Abs(x.ReferenceDriftPercent) > 5 ||
+                            x.Before.CoefficientOfVariationPercent > 5 ||
+                            x.Candidate.CoefficientOfVariationPercent > 5 ||
+                            x.After.CoefficientOfVariationPercent > 5))
+                    {
+                        verdict = TrialVerdict.Inconclusive;
+                        reason = "Excessive reference drift or benchmark noise. Do not infer performance gain.";
+                    }
+                    else if (comparisons.Any(x => x.PercentChange < -3))
+                    {
+                        verdict = TrialVerdict.Rejected;
+                        reason = "Measured performance regression; cause unknown (not proven ECC).";
+                    }
+                }
+                trialResults.Add(new TrialResult(candidate, verdict, reason,
+                    candidateResults, reading, DateTimeOffset.UtcNow, comparisons));
             }
 
             phase = RunPhase.Completed;
@@ -154,6 +159,28 @@ public sealed class TuningEngine(
         try { await audit.SaveAsync(report, CancellationToken.None); }
         catch (Exception ex) { throw new IOException("Could not persist audit report.", ex); }
         return report;
+
+        async Task<IReadOnlyList<WorkloadMeasurement>> ExecutePasses(CancellationToken ct)
+        {
+            var measurements = new List<WorkloadMeasurement>();
+            for (var repetition = 0; repetition < plan.Repetitions; repetition++)
+            {
+                foreach (var kind in Enum.GetValues<WorkloadKind>())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await guard.PulseAsync(ct);
+                    TunePolicy.RequireTelemetry(await device.ReadTelemetryAsync(ct), plan.MaxHotspotC);
+                    Emit(RunPhase.Benchmarking, $"{kind} pass {repetition + 1}/{plan.Repetitions}");
+                    var value = await workload.RunAsync(kind, plan.Seed + repetition, ct);
+                    measurements.Add(value);
+                    if (!value.Correct || value.Mismatches > 0)
+                        throw new SafetyException($"GPU correctness failed for {kind}: {value.Detail}");
+                    if (capabilities is { IsSimulation: false } && !value.ExecutedOnGpu)
+                        throw new SafetyException("Hardware experiment received a non-GPU workload result.");
+                }
+            }
+            return measurements;
+        }
 
         async Task RestoreAndVerify(TuningSettings baseline)
         {

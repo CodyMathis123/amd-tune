@@ -42,7 +42,8 @@ public sealed record TrialResult(
     string Reason,
     IReadOnlyList<WorkloadMeasurement> Measurements,
     GpuTelemetry? Telemetry,
-    DateTimeOffset At);
+    DateTimeOffset At,
+    IReadOnlyList<KindComparison>? Comparisons = null);
 
 public sealed record RunProgress(
     RunPhase Phase,

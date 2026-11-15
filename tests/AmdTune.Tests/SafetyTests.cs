@@ -13,7 +13,7 @@ public class SafetyTests
     {
         var caps = await new SimulatedGpuDevice().DiscoverAsync(default);
         Assert.True(caps.IsSimulation);
-        Assert.True(caps.Name.Contains("SIMULATED"));
+        Assert.Contains("SIMULATED", caps.Name);
     }
 
     [Theory]

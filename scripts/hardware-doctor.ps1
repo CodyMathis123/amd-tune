@@ -24,6 +24,16 @@ Write-Host "Read current driver settings:"
 & $bridge read
 if ($LASTEXITCODE -ne 0) { throw "Settings read failed."; }
 Write-Host "Read telemetry:"
-& $bridge telemetry
+$telemetryRaw = & $bridge telemetry
 if ($LASTEXITCODE -ne 0) { throw "Telemetry read failed."; }
+$telemetryRaw | ForEach-Object { Write-Host $_ }
+$telemetry = $telemetryRaw | ConvertFrom-Json
+$usageSchema = $telemetry.PSObject.Properties.Name -contains 'utilizationPercent'
+Write-Host "Native bridge GPU utilization telemetry schema: $usageSchema"
+if (-not $usageSchema) {
+  Write-Warning "The native ADLX bridge is older than the current source (missing utilizationPercent). Local dotnet publish preserves the existing C++ bridge; it does not rebuild it. Download the native bridge from a successful GitHub Actions run for the current commit, extract the complete development bundle or copy the bridge into artifacts/native, then republish. DO NOT download unknown third-party binaries."
+} elseif ($null -eq $telemetry.utilizationPercent) {
+  Write-Warning "GPU utilization metric is unavailable from ADLX; active-load power/efficiency must remain unverified."
+}
+Write-Host "Read-only checks do not establish factory-default tuning. Compare these current driver settings with your intended baseline before any performance experiment."
 Write-Host "Do not enable writes until driver ranges, GPU identity and guard are verified."

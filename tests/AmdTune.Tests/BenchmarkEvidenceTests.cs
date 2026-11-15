@@ -113,4 +113,87 @@ public class BenchmarkEvidenceTests
         public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
             => Task.FromResult(snapshot with { At = DateTimeOffset.UtcNow });
     }
+    [Fact]
+    public async Task Stopping_during_an_inflight_telemetry_read_is_normal_not_a_hardware_fault()
+    {
+        var gpu = new BlockingTelemetryDevice();
+        using var run = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(
+            gpu, 90, run, TimeSpan.FromMilliseconds(10));
+        sampler.Start();
+        await gpu.Entered.WaitAsync(TimeSpan.FromSeconds(3));
+        var evidence = await sampler.StopAsync().WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(0, evidence.SampleCount);
+        Assert.Equal(0, evidence.ActiveSamples);
+        Assert.False(run.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task Recorder_can_finish_a_correct_workload_while_a_read_is_in_flight()
+    {
+        var gpu = new BlockingTelemetryDevice();
+        var recorder = new WorkloadTelemetryRecorder(gpu);
+        var measurement = await recorder.CaptureAsync(
+            async ct =>
+            {
+                await gpu.Entered.WaitAsync(ct);
+                return new WorkloadMeasurement(
+                    WorkloadKind.Compute, true, true, 1024, 0, 512,
+                    "test", 300, "in-flight cancellation regression");
+            },
+            90, CancellationToken.None);
+        Assert.True(measurement.Correct);
+        Assert.NotNull(measurement.TelemetryEvidence);
+        Assert.Equal(0, measurement.TelemetryEvidence.SampleCount);
+    }
+
+    [Fact]
+    public async Task Telemetry_driver_error_is_never_suppressed_as_a_normal_stop()
+    {
+        var gpu = new FailingTelemetryDevice();
+        using var run = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(gpu, 90, run);
+        sampler.Start();
+        await gpu.Entered.WaitAsync(TimeSpan.FromSeconds(3));
+        await Task.Delay(25);
+        var error = await Assert.ThrowsAsync<SafetyException>(sampler.StopAsync);
+        Assert.Contains("ADLX diagnostic failure", error.Message);
+        Assert.True(run.IsCancellationRequested);
+    }
+
+    private sealed class BlockingTelemetryDevice : IGpuDevice
+    {
+        private readonly SimulatedGpuDevice _stub = new();
+        private readonly TaskCompletionSource<bool> _entered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Entered => _entered.Task;
+        public Task<DeviceCapabilities> DiscoverAsync(CancellationToken ct) => _stub.DiscoverAsync(ct);
+        public Task<TuningSettings> ReadSettingsAsync(CancellationToken ct) => _stub.ReadSettingsAsync(ct);
+        public Task ApplyAsync(TuningSettings settings, CancellationToken ct)
+            => throw new SafetyException("Mock must not write tuning settings.");
+        public async Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
+        {
+            _entered.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new GpuTelemetry(DateTimeOffset.UtcNow, 40, 100, 2000, 1000, 90);
+        }
+    }
+
+    private sealed class FailingTelemetryDevice : IGpuDevice
+    {
+        private readonly SimulatedGpuDevice _stub = new();
+        private readonly TaskCompletionSource<bool> _entered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Entered => _entered.Task;
+        public Task<DeviceCapabilities> DiscoverAsync(CancellationToken ct) => _stub.DiscoverAsync(ct);
+        public Task<TuningSettings> ReadSettingsAsync(CancellationToken ct) => _stub.ReadSettingsAsync(ct);
+        public Task ApplyAsync(TuningSettings settings, CancellationToken ct)
+            => throw new SafetyException("Mock must not write tuning settings.");
+        public Task<GpuTelemetry> ReadTelemetryAsync(CancellationToken ct)
+        {
+            _entered.TrySetResult(true);
+            return Task.FromException<GpuTelemetry>(new HardwareException("ADLX diagnostic failure"));
+        }
+    }
+
 }

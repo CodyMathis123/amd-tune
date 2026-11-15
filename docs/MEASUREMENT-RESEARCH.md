@@ -64,3 +64,16 @@ Sources and implications:
 - Auto-tuner bounded adaptive candidate selection, persisted experiment history, explicit abort and physical restart safety constraints.
 
 Keep Production unchanged and the PR draft until these gates have physical evidence.
+
+## November 15, 2026 — First sustained test, instrumentation issue
+
+An operator-run read-only physical test started at driver settings **-50 mV voltage offset, 2700 MHz configured VRAM limit, Fast Timing**, NOT the earlier 0 mV / 2518 MHz / Default tuning baseline. These values were unchanged at the end of the test. This driver state must be recognized as a custom profile and must **not** be confused with a stock A/B/A baseline.
+
+- Compute: 753.6 ms, 7,034 measured passes, all 1,048,576 outputs correct, no mismatches; 2 ADLX samples, 0 active samples.
+- Memory: 808.8 ms, 228 measured passes over 32 bounded slices each, all 33,554,432 outputs correct, no mismatches; 2 ADLX samples, 0 active samples.
+- Mixed: interrupted during telemetry sampler shutdown with `SafetyException: ADLX bridge timed out or was cancelled`. **GPU correctness unknown** for Mixed; do not label the setting unstable based on this error.
+- Root cause in source: `WorkloadTelemetrySampler.StopAsync()` cancels its in-flight subprocess request and `BridgeProcess.InvokeAsync()` converted even caller-requested cancellation into `HardwareException`. The sampler interpreted that manufactured exception as a hardware timeout.
+- Fix: preserve `OperationCanceledException` for caller-requested cancellation while **continuing to fail closed** for genuine internal 8-second ADLX timeouts, broken reads and thermal violations. Added deterministic mock-based concurrent-stop, recorder and failure-propagation regression tests.
+- The local `publish-windows.ps1` intentionally preserves the existing native ADLX bridge if no C++ build tools are installed. The previous binary may lack the newly-added `utilizationPercent` JSON key, causing active telemetry to remain at 0 even when shaders run. `hardware-doctor.ps1` now checks this telemetry schema and warns if stale. Replace the native bridge from a trusted current GitHub Actions bundle (or rebuild with pinned AMD SDK) to test the new utilization metric.
+
+**Next:** re-publish from a passing CI commit, refresh the native bridge if the schema is old, confirm the intentional custom profile versus factory-default baseline, and re-run `--hardware --verify-gpu --sustained-benchmark` without hardware writes. Stop on genuine sensor/thermal failures. No automatic tuning yet.

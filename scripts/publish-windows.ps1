@@ -21,6 +21,7 @@ try {
     Write-Host "Native ADLX bridge copied from local build."
   } elseif (Test-Path $appBridge) {
     Write-Host "Using existing native ADLX bridge from application directory (no local C++ build required)."
+    Write-Warning "This leaves the existing native bridge unchanged. It may be older than the pulled C++ source; run hardware-doctor.ps1 to check its GPU utilization telemetry schema. To update without MSVC, extract the current CI development bundle or copy its native bridge from your own repo's successful Actions build."
   } else {
     Write-Warning "Native ADLX bridge missing. Simulation mode works; hardware mode fails closed."
   }

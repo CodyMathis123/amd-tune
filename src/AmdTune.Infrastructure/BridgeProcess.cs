@@ -42,10 +42,21 @@ public sealed class BridgeProcess(string executablePath)
             });
             return value ?? throw new HardwareException("Bridge returned null JSON.");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A caller stopping its telemetry sampler is normal; it must not
+            // become a hardware fault. The child process still gets terminated.
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            // Preserve the original cancellation signal so the sampler can
+            // distinguish orderly shutdown from a real ADLX failure.
+            throw;
+        }
         catch (OperationCanceledException)
         {
-            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-            throw new HardwareException("ADLX bridge timed out or was cancelled.");
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            throw new HardwareException("ADLX bridge timed out after 8 seconds without a caller cancellation.");
         }
         catch (JsonException ex)
         {

@@ -179,3 +179,49 @@ The study is a **performance measurement / correctness soak**, not a
 continuous GPU-thermal stress workload, despite its five-minute session
 wall time. Long-term stability and GPU-only queue timestamp timing remain
 unvalidated.
+
+## High-load graphics and thermal monitoring versus synthetic correctness
+
+After a five-minute stock RX 9070 XT study at 0mV / 2518MHz / Default
+timings, all 297 synthetic GPU correctness tests passed, but maximum
+sampled hotspot was ~29°C and board power was far below its rated
+graphics workload level. Core clocks fluctuated and many source
+metrics appeared unchanged within a short workload despite distinct
+ADLX timestamps. The study establishes repeatability characteristics
+of the specific bounded synthetic shader, **not** sustained graphics
+or VRAM error stability.
+
+Research showed no generally accepted drop-in NuGet package that
+validates full-load Direct3D graphics and VRAM errors end-to-end.
+ComputeSharp (already in the repo) is a DirectX 12 compute programming
+library, **not** a finished GPU gaming stability test suite. FurMark 2
+provides Vulkan/OpenGL stress modes and time-bounded CLI arguments
+(`--demo furmark-vk --max-time 60`). OCCT provides graphics and VRAM
+error tests but its CLI is an Enterprise-only offering. 3DMark CLI
+requires Enterprise/Professional licensing.
+
+To gather independent GPU power/clock/thermal evidence while an external
+validated program supplies load, AMD Tune now supports a **strictly
+read-only passive monitoring CLI**:
+`--hardware --monitor-external-seconds 60 --external-load-label FurMark2-Vulkan`.
+The native ADLX stream gathers raw timestamped samples to a bounded
+16,384-reading buffer; analysis saves per-minute sensor power,
+utilization, clocks, hotspot and high-load proportion, distinguishing
+unique source timestamps and unique metric-value states. The
+temperature guard remains at 90°C, plus fail-closed sensor errors
+and driver settings readback.
+
+A critical limitation is that AMD Tune does **not** launch or
+terminate the external workload, so a sensor/thermal abort cannot
+automatically shut the test down. The operator must do so manually.
+A monitor pass means only sensor capture succeeded; load success,
+rendering correctness, VRAM error detection and crash information
+come from the independent stress application. No external tool's
+command line or output can be treated as evidence of GPU correctness
+unless the tool's reports are collected and verified.
+
+FurMark 2 CLI guide: https://geeks3dsoftware.com/furmark/command-line/
+FurMark vendor: https://geeks3d.com/furmark/
+OCCT Enterprise CLI: https://ocbase.com/occt/enterprise
+3DMark CLI licensing: https://support.benchmarks.ul.com/support/solutions/articles/44002145411-windows-run-3dmark-benchmarks-from-the-command-line
+ComputeSharp NuGet: https://www.nuget.org/packages/ComputeSharp/

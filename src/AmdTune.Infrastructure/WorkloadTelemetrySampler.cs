@@ -12,7 +12,8 @@ public sealed class WorkloadTelemetrySampler(
     IGpuDevice device,
     double hotspotLimitC,
     CancellationTokenSource workloadCancellation,
-    TimeSpan? sampleInterval = null) : IAsyncDisposable
+    TimeSpan? sampleInterval = null,
+    int maxSamples = 256) : IAsyncDisposable
 {
     // The native stream avoids expensive per-reading process startup, so
     // use a faster cadence only when that streaming path is supported.
@@ -30,6 +31,9 @@ public sealed class WorkloadTelemetrySampler(
     {
         if (_worker is not null) throw new InvalidOperationException("Sampler already started.");
         if (_interval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(sampleInterval));
+        if (maxSamples is < 1 or > 16384)
+            throw new ArgumentOutOfRangeException(nameof(maxSamples),
+                "Maximum retained raw ADLX telemetry samples must be between 1 and 16384.");
         _started = DateTimeOffset.UtcNow;
         _worker = Task.Run(PollAsync);
     }
@@ -71,7 +75,9 @@ public sealed class WorkloadTelemetrySampler(
     private void ValidateAndStore(GpuTelemetry reading)
     {
         TunePolicy.RequireTelemetry(reading, hotspotLimitC);
-        if (_samples.Count < 256) _samples.Add(reading);
+        if (_samples.Count < maxSamples) _samples.Add(reading);
+        else throw new SafetyException(
+            "ADLX sensor sample cap reached; the monitor must stop rather than silently discard data.");
     }
 
     public async Task<WorkloadTelemetryEvidence> StopAsync(HostTimedWindow? hostWindow = null)

@@ -93,6 +93,53 @@ from total ADLX snapshots; CPU setup samples can no longer masquerade
 as active GPU measurements. This is not GPU queue timestamp timing,
 and AMD's metrics may include averaged or delayed observations.
 
+### Passive telemetry while running a real graphics stress workload
+
+The five-minute synthetic read-only study completed 297/297 GPU correctness
+checks but sampled hotspot temperatures only up to 29°C and relatively low
+25–56W GPU board power. To inspect real graphics load rather than another
+short shader benchmark, use a separate established stress executable and
+AMD Tune's **passive read-only** telemetry recorder.
+
+FurMark 2 from Geeks3D provides a CLI (use its own `--help` and
+`--demolist` to confirm the installed version). For example, open two
+PowerShell terminals and run:
+
+**Terminal A, AMD Tune telemetry:**
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --monitor-external-seconds 60 --external-load-label FurMark2-Vulkan
+
+**Terminal B, in your installed FurMark 2 folder, shortly afterward:**
+
+    ./furmark.exe --demo furmark-vk --width 2560 --height 1440 --max-time 60
+
+For longer observation, use `300` seconds in both commands after
+the 60-second read-only shakedown passes and ensure the correct GPU
+was chosen. AMD Tune starts its monitoring immediately, so the recorder
+contains some idle startup and cooldown samples; the report has per-minute
+statistics and a fraction of samples with reported GPU utilization >=80%.
+
+The monitor stores raw ADLX telemetry, source timestamp uniqueness,
+sensor-value variation, peak/mean board power, core clocks, hotspot,
+first/last minute power comparison and initial/final driver settings.
+Reports have suffix `*.external-load.json` in
+`%LOCALAPPDATA%/AmdTune/soaks`. The external label is operator-supplied:
+AMD Tune does **not** verify what process, GPU, rendering workload or
+VRAM error test actually ran.
+
+**Safety limitation:** The monitor does not start, stop or terminate
+FurMark or OCCT. If AMD Tune reports a thermal/sensor safety failure,
+**stop the external stress application yourself immediately**. A
+`GPU_EXTERNAL_MONITOR_PASS` means the sensor recording and settings
+readback passed, **NOT** that FurMark or OCCT detected no artifacts
+or computational errors. Save the external tool's log separately.
+Keep Adrenalin at factory defaults for the initial run. Do not combine
+this with write-enabled tuning experiments.
+
+FurMark 2 docs: https://geeks3dsoftware.com/furmark/command-line/
+OCCT personal usage: https://www.ocbase.com/download-personal
+OCCT CLI requires Enterprise: https://www.ocbase.com/download-pro
+
 ### Full five-minute read-only performance and telemetry study
 
 The short three-workload checks and eight-slot crossover proved the test

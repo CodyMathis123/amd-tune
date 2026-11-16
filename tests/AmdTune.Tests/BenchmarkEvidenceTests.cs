@@ -558,4 +558,61 @@ public class BenchmarkEvidenceTests
         return observations.ToArray();
     }
 
+    [Fact]
+    public void External_load_analysis_reports_time_bins_and_heavy_load_fraction()
+    {
+        var start = new DateTimeOffset(2026, 11, 15, 18, 0, 0, TimeSpan.Zero);
+        var readings = new List<GpuTelemetry>();
+        foreach (var offset in new[] { 10, 20, 30 })
+            readings.Add(new GpuTelemetry(start.AddSeconds(offset), 60, 50,
+                1300, 2000, 40, 10_000 + offset * 1000));
+        foreach (var offset in new[] { 80, 90, 100, 110 })
+            readings.Add(new GpuTelemetry(start.AddSeconds(offset), 70, 100,
+                2200, 2400, 90, 10_000 + offset * 1000));
+        var result = ExternalLoadAnalysis.Analyze(readings, start, start.AddSeconds(120));
+        Assert.Equal(7, result.Samples);
+        Assert.Equal(7, result.SourceTimestampDistinctSamples);
+        Assert.Equal(2, result.DistinctMetricValueStates);
+        Assert.Equal(2, result.Minutes.Count);
+        Assert.Equal(3, result.Minutes[0].Samples);
+        Assert.Equal(4, result.Minutes[1].Samples);
+        Assert.Equal(100, result.PeakBoardPowerW);
+        Assert.Equal(70, result.PeakHotspotC);
+        Assert.Equal(2200, result.PeakCoreClockMhz);
+        Assert.Equal(4.0 / 7.0, result.HighUtilizationSampleFraction, 8);
+        Assert.Equal(100.0, result.LaterMinuteVsEarlyMinutePowerChangePercent!.Value, 6);
+    }
+
+    [Fact]
+    public void External_load_analysis_rejects_missing_data_and_does_not_claim_idle_is_stable()
+    {
+        var start = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var readings = Enumerable.Range(0, 10).Select(i =>
+            new GpuTelemetry(start.AddSeconds(i), 35, 20, 0, 30, 0, i + 1L))
+            .ToArray();
+        var result = ExternalLoadAnalysis.Analyze(readings, start, start.AddSeconds(30));
+        Assert.Equal(0.0, result.HighUtilizationSampleFraction);
+        Assert.Equal(20, result.MeanBoardPowerW);
+        Assert.Null(result.LaterMinuteVsEarlyMinutePowerChangePercent);
+        Assert.Contains(result.Limitations, message => message.Contains("does not launch"));
+        Assert.Throws<ArgumentException>(() => ExternalLoadAnalysis.Analyze([], start, start.AddSeconds(30)));
+        Assert.Throws<ArgumentException>(() => ExternalLoadAnalysis.Analyze(
+            readings, start.AddSeconds(30), start));
+    }
+
+    [Fact]
+    public async Task External_monitor_aborts_on_sample_capacity_overrun()
+    {
+        var gpu = new FakeStreamingDevice(false);
+        using var cancellation = new CancellationTokenSource();
+        await using var sampler = new WorkloadTelemetrySampler(
+            gpu, 90, cancellation, TimeSpan.FromMilliseconds(125), maxSamples: 3);
+        sampler.Start();
+        for (var i = 0; i < 100 && !cancellation.IsCancellationRequested; i++)
+            await Task.Delay(10);
+        Assert.True(cancellation.IsCancellationRequested);
+        var ex = await Assert.ThrowsAsync<SafetyException>(() => sampler.StopAsync());
+        Assert.Contains("sample cap", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
 }

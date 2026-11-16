@@ -41,6 +41,12 @@ var compareTelemetry = args.Contains("--compare-telemetry", StringComparer.Ordin
 var studyFlagIndex = Array.FindIndex(args, a =>
     string.Equals(a, "--study-seconds", StringComparison.OrdinalIgnoreCase));
 var studySeconds = 0;
+var externalMonitorFlagIndex = Array.FindIndex(args, a =>
+    string.Equals(a, "--monitor-external-seconds", StringComparison.OrdinalIgnoreCase));
+var externalMonitorSeconds = 0;
+var labelFlagIndex = Array.FindIndex(args, a =>
+    string.Equals(a, "--external-load-label", StringComparison.OrdinalIgnoreCase));
+var externalLoadLabel = "unspecified";
 int? readOnlySamplingIntervalMs = null;
 var sampleIntervalIndex = Array.FindIndex(args, a =>
     string.Equals(a, "--telemetry-interval-ms", StringComparison.OrdinalIgnoreCase));
@@ -75,6 +81,31 @@ if (compareTelemetry &&
         "do not add --telemetry-interval-ms, --soak-seconds, or hardware write flags.");
 if (hardware && !OperatingSystem.IsWindows())
     throw new PlatformNotSupportedException("AMD ADLX hardware mode currently requires Windows.");
+if (labelFlagIndex >= 0)
+{
+    if (externalMonitorFlagIndex < 0 || labelFlagIndex + 1 >= args.Length ||
+        string.IsNullOrWhiteSpace(args[labelFlagIndex + 1]) ||
+        args[labelFlagIndex + 1].Length > 100)
+        throw new InvalidOperationException(
+            "--external-load-label requires --monitor-external-seconds and a short label (1-100 characters).");
+    externalLoadLabel = args[labelFlagIndex + 1];
+}
+if (externalMonitorFlagIndex >= 0)
+{
+    if (!hardware || writeRequested || verifyGpu || sustainedBenchmark ||
+        extendedBenchmark || compareTelemetry || studyFlagIndex >= 0 ||
+        sampleIntervalIndex >= 0 ||
+        args.Contains("--soak-seconds", StringComparer.OrdinalIgnoreCase))
+        throw new InvalidOperationException(
+            "--monitor-external-seconds requires read-only --hardware, without benchmark, verification, telemetry override or hardware-write flags.");
+    if (externalMonitorFlagIndex + 1 >= args.Length ||
+        !int.TryParse(args[externalMonitorFlagIndex + 1], out externalMonitorSeconds) ||
+        externalMonitorSeconds is < ExternalLoadAnalysis.MinimumDurationSeconds or >
+            ExternalLoadAnalysis.MaximumDurationSeconds)
+        throw new ArgumentOutOfRangeException(nameof(args),
+            "External GPU load monitoring duration must be 30 to 900 seconds.");
+}
+
 if (studyFlagIndex >= 0)
 {
     if (!hardware || writeRequested || !verifyGpu || !sustainedBenchmark ||
@@ -127,6 +158,169 @@ builder.Services.AddSingleton(sp =>
     new ExperimentManager(sp.GetRequiredService<TuningEngine>(), !hardware || writeRequested));
 
 var app = builder.Build();
+
+// Passive, read-only external GPU load monitor. The user launches/stops
+// OCCT, 3DMark, a game or another tool separately. No GPU write commands and
+// crucially NO ability to terminate an external stress program on guard failure.
+if (externalMonitorSeconds > 0)
+{
+    var device = app.Services.GetRequiredService<IGpuDevice>();
+    var original = await device.ReadSettingsAsync(CancellationToken.None);
+    var final = original;
+    var started = DateTimeOffset.UtcNow;
+    var session = Guid.NewGuid();
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    WorkloadTelemetryEvidence? evidence = null;
+    ExternalLoadSummary? summary = null;
+    string? error = null;
+    var passed = false;
+
+    using var monitorCancellation = new CancellationTokenSource();
+    await using var sampler = new WorkloadTelemetrySampler(
+        device, 90, monitorCancellation, TimeSpan.FromMilliseconds(125),
+        ExternalLoadAnalysis.MaxRetainedSamples);
+    ConsoleCancelEventHandler onCancel = (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        monitorCancellation.Cancel();
+    };
+    Console.CancelKeyPress += onCancel;
+    Console.WriteLine($"EXTERNAL GPU LOAD MONITOR: passive ADLX monitoring for {externalMonitorSeconds}s.");
+    Console.WriteLine("No driver tuning writes. Start your external GPU stress test now.");
+    Console.WriteLine("WARNING: Thermal/sensor guard failure stops THIS MONITOR, not the external workload.");
+    Console.WriteLine("Stop the external workload yourself on a warning or any system instability.");
+    Console.WriteLine($"Original tuning: {original}");
+    Console.WriteLine($"External tool label: {externalLoadLabel} (self-reported, not verified).");
+    try
+    {
+        sampler.Start();
+        while (clock.Elapsed.TotalSeconds < externalMonitorSeconds)
+        {
+            var remaining = externalMonitorSeconds - clock.Elapsed.TotalSeconds;
+            await Task.Delay(TimeSpan.FromSeconds(Math.Min(10, Math.Max(0.001, remaining))),
+                monitorCancellation.Token);
+            if (clock.Elapsed.TotalSeconds < externalMonitorSeconds)
+                Console.WriteLine($"Monitoring... {clock.Elapsed.TotalSeconds:F0}/{externalMonitorSeconds} seconds");
+        }
+        passed = true;
+    }
+    catch (OperationCanceledException)
+    {
+        error = "Monitoring was interrupted by the operator or a sensor safety failure.";
+        Console.Error.WriteLine("GPU_EXTERNAL_MONITOR_INTERRUPTED: " + error);
+        Environment.ExitCode = 1;
+    }
+    catch (Exception ex)
+    {
+        error = ex.ToString();
+        Console.Error.WriteLine("GPU_EXTERNAL_MONITOR_FAIL: " + ex);
+        Environment.ExitCode = 1;
+    }
+    finally
+    {
+        try
+        {
+            evidence = await sampler.StopAsync();
+            if (passed)
+            {
+                if (evidence.SampleCount < 3)
+                    throw new SafetyException("External load monitoring had fewer than three ADLX readings.");
+                summary = ExternalLoadAnalysis.Analyze(evidence.Samples, evidence.StartedAt, evidence.FinishedAt);
+            }
+        }
+        catch (Exception ex)
+        {
+            passed = false;
+            error = ex.ToString();
+            Environment.ExitCode = 1;
+            Console.Error.WriteLine("GPU_EXTERNAL_MONITOR_FAIL: " + ex);
+            Console.Error.WriteLine(
+                "STOP THE EXTERNAL LOAD NOW: this process cannot terminate the GPU stress tool.");
+        }
+
+        try
+        {
+            final = await device.ReadSettingsAsync(CancellationToken.None);
+            if (final != original)
+            {
+                passed = false;
+                error = "Read-only monitoring detected changed driver tuning settings.";
+                Environment.ExitCode = 1;
+                Console.Error.WriteLine("GPU_EXTERNAL_MONITOR_FAIL: " + error);
+            }
+        }
+        catch (Exception ex)
+        {
+            passed = false;
+            error = "Final driver settings readback failed: " + ex;
+            Environment.ExitCode = 1;
+            Console.Error.WriteLine("GPU_EXTERNAL_MONITOR_FAIL: " + error);
+        }
+        clock.Stop();
+        Console.CancelKeyPress -= onCancel;
+
+        var folder = Path.Combine(dataDir, "soaks");
+        Directory.CreateDirectory(folder);
+        var destination = Path.Combine(folder, session.ToString("N") + ".external-load.json");
+        var report = new
+        {
+            SchemaVersion = 1,
+            SessionId = session,
+            Kind = "read-only-external-gpu-load-monitor",
+            ExternalLoadLabel = externalLoadLabel,
+            Simulated = false,
+            StartedAt = started,
+            FinishedAt = DateTimeOffset.UtcNow,
+            RequestedDurationSeconds = externalMonitorSeconds,
+            ActualDurationSeconds = clock.Elapsed.TotalSeconds,
+            OriginalSettings = original,
+            FinalSettings = final,
+            Completed = passed,
+            Error = error,
+            Summary = summary,
+            TelemetryEvidence = evidence,
+            Limitations =
+                "This monitor does not launch, validate, stop or terminate the external stress application. " +
+                "ADLX sampling is asynchronous and not calibrated GPU-only timing. " +
+                "GPU correctness/error counts must come from the external testing tool. " +
+                "No GPU tuning writes, no automatic overclock approval."
+        };
+        var temp = destination + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp,
+                System.Text.Json.JsonSerializer.Serialize(report,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temp, destination, true);
+            Console.WriteLine("Audit: " + destination);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+        if (summary is not null)
+        {
+            Console.WriteLine(
+                $"ADLX samples={summary.Samples}, source timestamps={summary.SourceTimestampDistinctSamples}, " +
+                $"distinct sensor states={summary.DistinctMetricValueStates}; " +
+                $"utilization mean={summary.MeanGpuUtilizationPercent?.ToString("F1") ?? "n/a"}%, " +
+                $"peak={summary.PeakGpuUtilizationPercent?.ToString("F1") ?? "n/a"}%; " +
+                $"power mean={summary.MeanBoardPowerW?.ToString("F1") ?? "n/a"}W, " +
+                $"peak={summary.PeakBoardPowerW?.ToString("F1") ?? "n/a"}W; " +
+                $"hotspot max={summary.PeakHotspotC?.ToString("F1") ?? "n/a"}C.");
+            foreach (var minute in summary.Minutes)
+                Console.WriteLine(
+                    $"Minute {minute.Minute + 1}: N={minute.Samples}, " +
+                    $"GPU utilization mean={minute.MeanGpuUtilizationPercent?.ToString("F1") ?? "n/a"}%, " +
+                    $"board power mean={minute.MeanBoardPowerW?.ToString("F1") ?? "n/a"}W, " +
+                    $"hotspot peak={minute.PeakHotspotC?.ToString("F1") ?? "n/a"}C.");
+            if (summary.HighUtilizationSampleFraction < 0.5)
+                Console.WriteLine("LOAD QUALITY WARNING: Fewer than half of readings showed >=80% GPU utilization. " +
+                                  "This is not evidence of a sustained heavy GPU load.");
+        }
+        Console.WriteLine("Final tuning: " + final);
+        Console.WriteLine(passed ? "GPU_EXTERNAL_MONITOR_PASS" : "GPU_EXTERNAL_MONITOR_FAIL");
+        if (!passed) Environment.ExitCode = 1;
+    }
+    return;
+}
 
 // Read-only correctness soak. It deliberately does NOT apply tuning values.
 var soakFlagIndex = Array.FindIndex(args, a =>

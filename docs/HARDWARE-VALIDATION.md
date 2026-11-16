@@ -292,6 +292,33 @@ shader windows. Do not promote to write-enabled automation based only on
 a passing soak. Continue to require a real crash-recovery fault test
 before automatic tuning.
 
+## Read-only real-graphics thermal/load monitoring
+
+The stock RX 9070 XT five-minute synthetic measurement campaign had
+297/297 correct workloads but hotspot <=29°C and board power below
+typical demanding-gaming levels. Temperature alone is not a stress
+indicator for the owner's custom liquid cooling. Before implementing an
+unvalidated heavy ComputeSharp shader or enabling adaptive tuning, use
+FurMark 2 (read-only graphics burn-in) or OCCT (independent error
+detection) under the operator's direct control.
+
+Run AMD Tune in a second terminal:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --monitor-external-seconds 60 --external-load-label FurMark2-Vulkan
+
+Start a time-limited external load within the first few seconds, e.g.
+from the installed FurMark 2 folder:
+
+    ./furmark.exe --demo furmark-vk --width 2560 --height 1440 --max-time 60
+
+The first 60s is a *physical shakedown*. Review both AMD Tune's
+`*.external-load.json` and FurMark/OCCT's own evidence before a 300s
+run. A successful AMD Tune sensor-monitor result is **not** a graphics
+correctness or long-term stability pass. A thermal guard abort stops
+the monitor only; **operator must stop the external GPU stress process**.
+No GPU tuning writes are used here. No crash-recovery fault injection
+or background auto-tuning.
+
 ## Gate 2 — recovery fault injection
 
 Do this only after Gate 1 passes, with an unmodified stock profile available.

@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+.vs/
+.vscode/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.pdb
+**/tuner_state.json
+**/*.recovery.log
+**/*.ready
+**/*.done
+**/*.tmp
+
+# AMD ADLX SDK is a separate upstream checkout with its own license.
+third_party/

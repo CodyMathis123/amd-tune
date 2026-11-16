@@ -594,7 +594,7 @@ public class BenchmarkEvidenceTests
         Assert.Equal(0.0, result.HighUtilizationSampleFraction);
         Assert.Equal(20, result.MeanBoardPowerW);
         Assert.Null(result.LaterMinuteVsEarlyMinutePowerChangePercent);
-        Assert.Contains(result.Limitations, message => message.Contains("does not launch"));
+        Assert.Contains(result.Limitations, message => message.Contains("does not start"));
         Assert.Throws<ArgumentException>(() => ExternalLoadAnalysis.Analyze([], start, start.AddSeconds(30)));
         Assert.Throws<ArgumentException>(() => ExternalLoadAnalysis.Analyze(
             readings, start.AddSeconds(30), start));

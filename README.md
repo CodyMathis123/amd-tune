@@ -93,6 +93,61 @@ from total ADLX snapshots; CPU setup samples can no longer masquerade
 as active GPU measurements. This is not GPU queue timestamp timing,
 and AMD's metrics may include averaged or delayed observations.
 
+### Supervised FurMark 2 Vulkan stress (read-only, experimental)
+
+AMD Tune can now **launch, own, time-limit, monitor and stop** a separate
+FurMark 2 Vulkan graphics load. This is a read-only experiment; it does
+not set clocks, voltages or memory timings and cannot automatically
+approve a tuning profile.
+
+Install FurMark 2 from its vendor (Geeks3D). Check its CLI with
+`furmark.exe --help` and `furmark.exe --demolist`. From the AMD Tune repo
+root, use the exact local executable path (which may contain spaces):
+
+```powershell
+git pull --ff-only
+.\scripts\publish-windows.ps1
+.\artifacts\app\AmdTune.Web.exe --hardware --run-furmark --furmark-exe "C:\Path\To\FurMark2\furmark.exe" --furmark-seconds 60
+.\scripts\hardware-doctor.ps1
+```
+
+Use 60 seconds at **known factory-default Adrenalin tuning** for the
+first physical shakedown. The supervised process uses a fixed Vulcan
+`--demo furmark-vk --width 2560 --height 1440 --max-time 60` CLI plus
+`--print-render-speed` diagnostic output. Duration range is 30–600s.
+It records the FurMark executable's SHA-256, owned process ID, exit
+code, captured bounded stdout/stderr, watchdog deadline/cancellation,
+read-only ADLX metrics and original/final driver tuning settings. Audit:
+`%LOCALAPPDATA%/AmdTune/soaks/*.furmark.json`.
+
+The monitored subprocess is **owned** by AMD Tune: an ADLX sensor
+failure, 90°C hotspot limit, Ctrl+C or the independent child-process
+deadline triggers a process-tree termination attempt. The tool also
+checks for abnormal early exit/nonzero exit status and leaves
+auto-tuning writes **disabled**. FurMark itself may display a 3D window;
+ensure the RX 9070 XT is the rendering device. Process exit 0 and
+`FURMARK_SUPERVISED_PASS` do not prove shader/VRAM correctness or
+gaming stability; they mean only that an owned external run completed
+and monitoring/settings checks passed.
+
+**No process-survival guarantee after a full OS crash/power cut.**
+External child-tree cleanup and GPU settings restoration after forced
+termination are different safety mechanisms. The latter is not yet
+physically fault-injection tested and therefore candidate automation
+is still locked.
+
+For gaming-oriented comparison, use a **repeatable replay/benchmark
+scene** and ETW frame-time capture via Intel PresentMon. Its CLI supports
+`--process_name`, `--timed` and `--output_file`, with CSV frame
+timings for average FPS, 1% lows (from the appropriate distribution),
+stutter and frame-time percentiles. Without a controlled sequence,
+different gameplay scenes or camera paths dominate the effect of
+small GPU tuning changes. AMD Tune has **not** yet integrated PresentMon
+or claimed to calculate 1% lows from ADLX GPU usage.
+
+FurMark 2 documented CLI: https://furmarksoftware.org/furmark/command-line/
+PresentMon upstream CLI: https://github.com/GameTechDev/PresentMon/blob/main/README-ConsoleApplication.md
+
 ### Passive telemetry while running a real graphics stress workload
 
 The five-minute synthetic read-only study completed 297/297 GPU correctness

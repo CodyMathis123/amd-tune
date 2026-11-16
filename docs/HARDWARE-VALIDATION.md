@@ -292,6 +292,35 @@ shader windows. Do not promote to write-enabled automation based only on
 a passing soak. Continue to require a real crash-recovery fault test
 before automatic tuning.
 
+## Next gate: AMD Tune supervised FurMark 2, read-only (unverified on hardware)
+
+The first FurMark integration lets AMD Tune own the FurMark 2 process
+rather than requiring a second terminal. It is **not** a tuning
+experiment and refuses `--enable-hardware-writes`, concurrent
+experiments and arbitrary executable names. It launches only an
+explicitly supplied absolute `furmark.exe` using the documented Vulkan
+demo, a hard maximum runtime and a 90°C hotspot guard:
+
+    ./artifacts/app/AmdTune.Web.exe --hardware --run-furmark --furmark-exe "C:\Path\To\FurMark2\furmark.exe" --furmark-seconds 60
+    ./scripts/hardware-doctor.ps1
+
+The CLI has an independent subprocess deadline of `requested
+duration + 30s`, a cancellation/thermal fail-stop and process-tree
+termination attempt. Readback of the same original tuning values is
+required to report completed. The `*.furmark.json` audit contains
+the executable SHA-256, PID, exit code, bounded output, ADLX
+utilization/power/hotspot and minute bins. Early or nonzero exits
+are failures. A PASS is **a process/telemetry success only**,
+not proof of rendered-output correctness, error-free VRAM or
+suitability for automatic overclocking.
+
+Run the first 60s physical shakedown only with Adrenalin on known
+defaults. Check that the FurMark window shows the Radeon RX 9070 XT
+and stop for visible artifacts or unusual device behavior.
+A successful shakedown permits a supervised 300s exploratory
+thermal/load run. Separate OCCT GPU/VRAM error validation and
+PresentMon repeatable game-frame timings remain future gates.
+
 ## Read-only real-graphics thermal/load monitoring
 
 The stock RX 9070 XT five-minute synthetic measurement campaign had

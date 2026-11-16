@@ -44,6 +44,11 @@ var studySeconds = 0;
 var externalMonitorFlagIndex = Array.FindIndex(args, a =>
     string.Equals(a, "--monitor-external-seconds", StringComparison.OrdinalIgnoreCase));
 var externalMonitorSeconds = 0;
+var superviseFurMark = args.Contains("--run-furmark", StringComparer.OrdinalIgnoreCase);
+var furMarkPathFlag = Array.FindIndex(args, a =>
+    string.Equals(a, "--furmark-exe", StringComparison.OrdinalIgnoreCase));
+var furMarkSecondsFlag = Array.FindIndex(args, a =>
+    string.Equals(a, "--furmark-seconds", StringComparison.OrdinalIgnoreCase));
 var labelFlagIndex = Array.FindIndex(args, a =>
     string.Equals(a, "--external-load-label", StringComparison.OrdinalIgnoreCase));
 var externalLoadLabel = "unspecified";
@@ -81,6 +86,25 @@ if (compareTelemetry &&
         "do not add --telemetry-interval-ms, --soak-seconds, or hardware write flags.");
 if (hardware && !OperatingSystem.IsWindows())
     throw new PlatformNotSupportedException("AMD ADLX hardware mode currently requires Windows.");
+if (superviseFurMark)
+{
+    if (!hardware || writeRequested || verifyGpu || sustainedBenchmark ||
+        extendedBenchmark || compareTelemetry || studyFlagIndex >= 0 ||
+        externalMonitorFlagIndex >= 0 || labelFlagIndex >= 0 ||
+        sampleIntervalIndex >= 0 ||
+        args.Contains("--soak-seconds", StringComparer.OrdinalIgnoreCase))
+        throw new InvalidOperationException(
+            "--run-furmark requires read-only --hardware and cannot be combined with other testing or write flags.");
+    if (furMarkPathFlag < 0 || furMarkPathFlag + 1 >= args.Length)
+        throw new InvalidOperationException("--run-furmark requires --furmark-exe with an absolute path.");
+    if (furMarkSecondsFlag >= 0 && (furMarkSecondsFlag + 1 >= args.Length ||
+        !int.TryParse(args[furMarkSecondsFlag + 1], out var value) ||
+        value is < FurMarkPlan.MinimumSeconds or > FurMarkPlan.MaximumSeconds))
+        throw new InvalidOperationException("--furmark-seconds must be between 30 and 600.");
+}
+else if (furMarkPathFlag >= 0 || furMarkSecondsFlag >= 0)
+    throw new InvalidOperationException("FurMark-specific options require --run-furmark.");
+
 if (labelFlagIndex >= 0)
 {
     if (externalMonitorFlagIndex < 0 || labelFlagIndex + 1 >= args.Length ||
@@ -158,6 +182,77 @@ builder.Services.AddSingleton(sp =>
     new ExperimentManager(sp.GetRequiredService<TuningEngine>(), !hardware || writeRequested));
 
 var app = builder.Build();
+
+// Supervised FurMark 2 Vulkan stress test with bounded process lifetime.
+// We own the child process and can terminate it on an ADLX thermal or sensor
+// failure. No driver-tuning writes or automatic candidate sweeps are enabled.
+if (superviseFurMark)
+{
+    var duration = furMarkSecondsFlag >= 0 ? int.Parse(
+        args[furMarkSecondsFlag + 1], System.Globalization.CultureInfo.InvariantCulture) : 60;
+    var plan = new FurMarkPlan(args[furMarkPathFlag + 1], duration);
+    plan.Validate();
+    var supervisor = new FurMarkSupervisor(app.Services.GetRequiredService<IGpuDevice>());
+    using var operatorStop = new CancellationTokenSource();
+    ConsoleCancelEventHandler handler = (_, e) =>
+    {
+        e.Cancel = true;
+        operatorStop.Cancel();
+    };
+    Console.CancelKeyPress += handler;
+    Console.WriteLine("FURMARK 2 SUPERVISED STRESS: READ ONLY; no GPU tuning changes.");
+    Console.WriteLine($"Launching: {plan.ExecutablePath} (Vulkan {plan.Width}x{plan.Height}; {plan.DurationSeconds}s)");
+    Console.WriteLine($"Hotspot guard: {FurMarkPlan.MaxHotspotC:F0}C. Test process will be terminated on guard or sensor failure.");
+    Console.WriteLine("Note: FurMark CLI exit status cannot certify rendered-frame correctness or gaming stability.");
+    try
+    {
+        var report = await supervisor.RunAsync(plan, operatorStop.Token);
+        var folder = Path.Combine(dataDir, "soaks");
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, report.SessionId.ToString("N") + ".furmark.json");
+        var tmp = path + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(tmp,
+                System.Text.Json.JsonSerializer.Serialize(report,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            File.Move(tmp, path, true);
+        }
+        finally { if (File.Exists(tmp)) File.Delete(tmp); }
+        Console.WriteLine($"FurMark PID: {report.Process?.ProcessId}; exit={report.Process?.ExitCode}; " +
+            $"process time={report.Process?.WallSeconds.ToString("F1") ?? "unknown"}s, " +
+            $"aborted={report.Process?.Aborted}, timeout={report.Process?.TimedOut}");
+        Console.WriteLine($"ADLX samples: {report.TelemetrySummary?.Samples ?? 0}; " +
+            $"distinct value states={report.TelemetrySummary?.DistinctMetricValueStates ?? 0}; " +
+            $"mean GPU utilization={report.TelemetrySummary?.MeanGpuUtilizationPercent?.ToString("F1") ?? "missing"}%; " +
+            $"peak hotspot={report.TelemetrySummary?.PeakHotspotC?.ToString("F1") ?? "missing"}C; " +
+            $"mean board power={report.TelemetrySummary?.MeanBoardPowerW?.ToString("F1") ?? "missing"} W");
+        Console.WriteLine($"Classification: {report.ResultClassification}");
+        Console.WriteLine($"Original settings: {report.OriginalSettings}");
+        Console.WriteLine($"Final settings: {report.FinalSettings}");
+        Console.WriteLine("Audit: " + path);
+        if (!string.IsNullOrWhiteSpace(report.Process?.StdOutTail))
+            Console.WriteLine("FurMark stdout tail (unverified rendering statistics):\n" + report.Process.StdOutTail);
+        if (!string.IsNullOrWhiteSpace(report.Process?.StdErrTail))
+            Console.WriteLine("FurMark stderr tail:\n" + report.Process.StdErrTail);
+        Console.WriteLine(report.Completed ? "FURMARK_SUPERVISED_PASS" : "FURMARK_SUPERVISED_FAIL");
+        if (!report.Completed)
+        {
+            Console.Error.WriteLine(report.Error ?? "FurMark supervision incomplete.");
+            Environment.ExitCode = 1;
+        }
+    }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine("FURMARK_SUPERVISED_FAIL: " + error);
+        Environment.ExitCode = 1;
+    }
+    finally
+    {
+        Console.CancelKeyPress -= handler;
+    }
+    return;
+}
 
 // Passive, read-only external GPU load monitor. The user launches/stops
 // OCCT, 3DMark, a game or another tool separately. No GPU write commands and

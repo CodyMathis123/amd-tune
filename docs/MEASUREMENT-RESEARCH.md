@@ -225,3 +225,48 @@ FurMark vendor: https://geeks3d.com/furmark/
 OCCT Enterprise CLI: https://ocbase.com/occt/enterprise
 3DMark CLI licensing: https://support.benchmarks.ul.com/support/solutions/articles/44002145411-windows-run-3dmark-benchmarks-from-the-command-line
 ComputeSharp NuGet: https://www.nuget.org/packages/ComputeSharp/
+
+## Supervised external FurMark 2, runtime containment and games
+
+A vendor-supported FurMark 2 CLI permits deterministic Vulkan stress
+execution via `--demo furmark-vk --width 2560 --height 1440 --max-time
+<seconds>`, and `--print-render-speed` emits rendering diagnostic
+information where supported. The new supervised runner validates an
+absolute `furmark.exe` path and an explicit bounded duration
+(30-600s), hashes the local executable (provenance record, *not* an
+authenticity guarantee), launches a single process without a shell,
+captures only bounded stdout/stderr tails and owns a second independent
+`duration+30s` process-lifetime deadline.
+
+The native ADLX telemetry stream remains fail-closed under a 90°C
+hotspot guard. Sensor failures request cancellation and the owned
+process-tree kill; the same cleanup occurs on console Ctrl+C or a
+supervisor timeout. Initial/final tuning settings are compared and
+the audit includes process exit code, abnormal early termination,
+observed GPU loading and minutely power/hotspot/clock data. **Hardware
+validation is still required**. A FurMark process exit status cannot
+certify computational correctness or VRAM error freedom, and exact
+FurMark performance output may not be available via redirected stdout.
+An independent FurMark/OCCT/driver error signal or screenshot cannot
+be invented from empty output.
+
+Gaming performance should be captured separately using an ETW
+present trace such as Intel PresentMon, ideally from fixed scripted
+in-game benchmarks or repeatable scene captures, with controls for
+resolution/quality, vsync, frame-generation/upscaling, driver state,
+background load, and repeated cold/warm sessions. PresentMon's
+`--process_name <exe> --output_file <csv> --timed <seconds>` captures
+per-present timing data, from which distributions, average FPS and
+low-percentile performance can be derived. AMD Tune does **not**
+currently parse or command PresentMon; it must not infer 1% lows or
+rendered FPS from ADLX utilization.
+
+The automatic search remains gated: the external supervisor does not
+apply GPU settings. Crash-termination rollback on the physical device
+must be tested before allowing even one supervised write-enabled
+candidate, then stability and performance validation must be separate
+from candidate selection. Stop at the first mismatch/reset/hotspot
+guard failure, and restore original settings.
+
+FurMark CLI reference: https://furmarksoftware.org/furmark/command-line/
+PresentMon CLI reference: https://github.com/GameTechDev/PresentMon/blob/main/README-ConsoleApplication.md

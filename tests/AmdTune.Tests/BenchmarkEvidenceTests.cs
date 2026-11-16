@@ -615,4 +615,74 @@ public class BenchmarkEvidenceTests
         Assert.Contains("sample cap", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Supervised_furmark_only_accepts_bounded_explicit_executable_and_arguments()
+    {
+        var valid = new FurMarkPlan(@"C:\Tools\FurMark2\furmark.exe", 60, 2560, 1440);
+        valid.Validate();
+        Assert.Equal(new[]
+        {
+            "--demo", "furmark-vk",
+            "--width", "2560", "--height", "1440",
+            "--max-time", "60", "--print-render-speed"
+        }, valid.Arguments());
+        Assert.Throws<SafetyException>(() => (valid with
+            { ExecutablePath = @"C:\Windows\System32\cmd.exe" }).Validate());
+        Assert.Throws<SafetyException>(() => (valid with
+            { ExecutablePath = "furmark.exe" }).Validate());
+        Assert.Throws<SafetyException>(() => (valid with
+            { DurationSeconds = 601 }).Validate());
+        Assert.Throws<SafetyException>(() => (valid with
+            { DurationSeconds = 10 }).Validate());
+        Assert.Throws<SafetyException>(() => (valid with
+            { Width = 100_000 }).Validate());
+    }
+
+    [Fact]
+    public async Task Owned_stress_process_reports_nonzero_exit_and_captures_output()
+    {
+        var comspec = Environment.GetEnvironmentVariable("ComSpec") ??
+            @"C:\Windows\System32\cmd.exe";
+        var result = await OwnedProcessRunner.RunAsync(
+            comspec,
+            ["/c", "echo FURMARK_LIFECYCLE_TEST && exit /b 7"],
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None);
+        Assert.Equal(7, result.ExitCode);
+        Assert.False(result.Aborted);
+        Assert.False(result.TimedOut);
+        Assert.Contains("FURMARK_LIFECYCLE_TEST", result.StdOutTail);
+    }
+
+    [Fact]
+    public async Task Owned_stress_process_is_killed_on_deadline()
+    {
+        var comspec = Environment.GetEnvironmentVariable("ComSpec") ??
+            @"C:\Windows\System32\cmd.exe";
+        var result = await OwnedProcessRunner.RunAsync(
+            comspec,
+            ["/c", "ping -n 20 127.0.0.1 > nul"],
+            TimeSpan.FromSeconds(1),
+            CancellationToken.None);
+        Assert.True(result.Aborted);
+        Assert.True(result.TimedOut);
+        Assert.True(result.WallSeconds < 10);
+    }
+
+    [Fact]
+    public async Task Owned_stress_process_is_killed_when_sensor_guard_requests_stop()
+    {
+        var comspec = Environment.GetEnvironmentVariable("ComSpec") ??
+            @"C:\Windows\System32\cmd.exe";
+        using var safety = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        var result = await OwnedProcessRunner.RunAsync(
+            comspec,
+            ["/c", "ping -n 20 127.0.0.1 > nul"],
+            TimeSpan.FromSeconds(10),
+            safety.Token);
+        Assert.True(result.Aborted);
+        Assert.False(result.TimedOut);
+        Assert.Contains("Monitoring", result.FailureReason);
+    }
+
 }

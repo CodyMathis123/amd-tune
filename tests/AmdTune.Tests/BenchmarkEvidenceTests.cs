@@ -579,7 +579,7 @@ public class BenchmarkEvidenceTests
         Assert.Equal(100, result.PeakBoardPowerW);
         Assert.Equal(70, result.PeakHotspotC);
         Assert.Equal(2200, result.PeakCoreClockMhz);
-        Assert.Equal(4.0 / 7.0, result.HighUtilizationSampleFraction, 8);
+        Assert.Equal(4.0 / 7.0, result.HighUtilizationSampleFraction!.Value, 8);
         Assert.Equal(100.0, result.LaterMinuteVsEarlyMinutePowerChangePercent!.Value, 6);
     }
 
